@@ -10,7 +10,7 @@ import type { WorkflowCtx, WorkflowRunCtx } from "../utils/types.ts"
 export const meta = {
   name: "workflow_epic",
   summary: "New epic",
-  chain: "PM (scope) → updates docs/OVERVIEW.md",
+  chain: "PM (scope) → updates docs/ROADMAP.md",
   generates: "ai-artifacts/epics/[epic].md",
 }
 
@@ -105,6 +105,7 @@ async function runEpicWorkflow({ epicName, epicGoal, ...runCtx }: EpicArgs): Pro
   const slug = epicName.toLowerCase().replace(/\s+/g, "-")
   const epicsDir = `ai-artifacts/epics`
   const overviewPath = `docs/OVERVIEW.md`
+  const roadmapPath = `docs/ROADMAP.md`
   const lines: string[] = []
 
   lines.push(`# Workflow: Epic — ${epicName}`)
@@ -130,31 +131,50 @@ Include:
   const epicFilePath = await writeDoc(directory, `${epicsDir}/${slug}.md`, formatDoc("Epic", epicName, epicDef))
   lines.push(`   ✓ Epic written → ${epicFilePath}`)
 
-  // ── Step 2: Update docs/OVERVIEW.md ─────────────────────────
+  // ── Step 2: Generate OVERVIEW.md if it doesn't exist yet ─────────────────────
   lines.push("## Updating project documentation...")
   const existingOverview = await readDoc(directory, overviewPath)
-  const updatedOverview = await runAgentSession(runCtx, "pm", `
-Update the project overview document to include this new epic.
+  if (!existingOverview) {
+    const overview = await runAgentSession(runCtx, "pm", `
+Create a concise project overview document based on the codebase context.
 
-${existingOverview
-  ? `Existing OVERVIEW.md:\n${existingOverview}\n\n---\n\nAdd or update the section for this epic. Keep all existing content intact.`
-  : `No overview exists yet. Create a project overview document from scratch.`}
+Include:
+- One paragraph describing what this project is and its purpose
+- Key technologies used
+- Repository structure (main directories and their role)
+- How to get started (brief)
 
-New epic to add (this is the ONLY epic to add — do NOT invent other epics):
+Do NOT include epics, roadmap, or planning information — that belongs in ROADMAP.md.
+Keep it stable: this document should rarely need to change.
+`.trim())
+    const overviewFilePath = await writeDoc(directory, overviewPath, overview)
+    lines.push(`   ✓ Overview created → ${overviewFilePath}`)
+  }
+
+  // ── Step 3: Upsert ROADMAP.md with the new epic ───────────────────────────────
+  const existingRoadmap = await readDoc(directory, roadmapPath)
+  const updatedRoadmap = await runAgentSession(runCtx, "pm", `
+Update the project roadmap to include this new epic.
+
+${existingRoadmap
+  ? `Existing ROADMAP.md:\n${existingRoadmap}\n\n---\n\nAdd or update the entry for this epic. Keep all existing epics intact. Do NOT invent new ones.`
+  : `No roadmap exists yet. Create one from scratch with only this epic.`}
+
+Epic to add:
 ${epicDef}
 
-The document should:
-- Start with a brief project overview (what this project is, its purpose)
-- List only epics that have been explicitly defined (do NOT invent or suggest new ones)
-- Be concise and useful for a new developer joining the project
+Format:
+- One section per epic with: status (TODO / IN PROGRESS / DONE), priority, one-line description, effort estimate
+- Keep it concise — this is a planning reference, not detailed documentation
 `.trim())
-  const overviewFilePath = await writeDoc(directory, overviewPath, updatedOverview)
-  lines.push(`   ✓ Overview updated → ${overviewFilePath}`)
+  const roadmapFilePath = await writeDoc(directory, roadmapPath, updatedRoadmap)
+  lines.push(`   ✓ Roadmap updated → ${roadmapFilePath}`)
 
   lines.push(`\n## Done ✓`)
   lines.push(`Generated:`)
   lines.push(`  - ${epicsDir}/${slug}.md`)
-  lines.push(`  - ${overviewPath}`)
+  if (!existingOverview) lines.push(`  - ${overviewPath} (created)`)
+  lines.push(`  - ${roadmapPath}`)
   lines.push(`\nReview the epic, then use \`workflow_feature\` for each feature you want to implement.`)
 
   return lines.join("\n")
