@@ -172,7 +172,8 @@ Start with \`workflow_epics\` to see your roadmap, or \`workflow_epic\` to creat
 async function getCurrentSessionId(client: OpencodeClient, directory: string): Promise<string> {
   const res = await client.session.list({ query: { directory } })
   const sessions = (res.data ?? []) as Array<{ id: string; parentID?: string }>
-  const root = sessions.filter((s) => !s.parentID).at(-1)
+  // Prefer root sessions (no parentID), fallback to most recent session
+  const root = sessions.filter((s) => !s.parentID).at(-1) ?? sessions.at(-1)
   if (!root) throw new Error("No active session found")
   return root.id
 }
