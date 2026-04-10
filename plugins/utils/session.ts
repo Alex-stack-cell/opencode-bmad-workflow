@@ -1,5 +1,9 @@
 import type { OpencodeClient } from "@opencode-ai/sdk"
+import type { WorkflowCtx, WorkflowRunCtx } from "./types.ts"
 
+// ─── Session resolution ───────────────────────────────────────────────────────
+
+/** Resolves the active root sessionId for the given directory. */
 export async function getCurrentSessionId(client: OpencodeClient, directory: string): Promise<string> {
   const res = await client.session.list({ query: { directory } })
   const sessions = (res.data ?? []) as Array<{ id: string; parentID?: string }>
@@ -9,17 +13,35 @@ export async function getCurrentSessionId(client: OpencodeClient, directory: str
 }
 
 /**
- * Run a prompt in a child session using a specific agent.
- * Waits for the session to become idle, then returns the last assistant text.
+ * Resolves the sessionId then calls fn with a complete WorkflowRunCtx.
+ * Removes the getCurrentSessionId boilerplate from every execute().
+ */
+export async function withSession<T>(
+  ctx: WorkflowCtx,
+  fn: (runCtx: WorkflowRunCtx) => Promise<T>,
+): Promise<T> {
+  const sessionId = await getCurrentSessionId(ctx.client, ctx.directory)
+  return fn({ ...ctx, sessionId })
+}
+
+// ─── Agent execution ──────────────────────────────────────────────────────────
+
+/**
+ * Sends a prompt to a child session via a named agent.
+ * Waits until the session is idle, then returns the last assistant text.
+ *
+ * @param runCtx - context holding client, directory, and parent sessionId
+ * @param agentName - name of the OpenCode agent to invoke
+ * @param prompt - prompt text to send
+ * @returns last assistant text message, or "" if none
  */
 export async function runAgentSession(
-  client: OpencodeClient,
-  parentSessionId: string,
-  directory: string,
+  runCtx: WorkflowRunCtx,
   agentName: string,
   prompt: string,
 ): Promise<string> {
-  // 1. Create a child session
+  const { client, directory, sessionId: parentSessionId } = runCtx
+
   const sessionRes = await client.session.create({
     body: { parentID: parentSessionId, title: `[workflow] ${agentName}` },
     query: { directory },
@@ -29,20 +51,14 @@ export async function runAgentSession(
 
   const sessionId = session.id
 
-  // 2. Send the prompt to the child session with the target agent
   await client.session.prompt({
     path: { id: sessionId },
-    body: {
-      agent: agentName,
-      parts: [{ type: "text", text: prompt }],
-    },
+    body: { agent: agentName, parts: [{ type: "text", text: prompt }] },
     query: { directory },
   })
 
-  // 3. Poll until the session is no longer busy
   await waitForIdle(client, sessionId, directory)
 
-  // 4. Extract the last assistant text response
   const messagesRes = await client.session.messages({
     path: { id: sessionId },
     query: { directory },
@@ -53,14 +69,16 @@ export async function runAgentSession(
     const msg = messages[i]
     const info = msg.info as { role?: string }
     if (info?.role !== "assistant") continue
-    const textPart = msg.parts.find(
-      (p: { type: string }) => p.type === "text",
-    ) as { type: "text"; text: string } | undefined
+    const textPart = msg.parts.find((p: { type: string }) => p.type === "text") as
+      | { type: "text"; text: string }
+      | undefined
     if (textPart?.text) return textPart.text
   }
 
   return ""
 }
+
+// ─── Internals ────────────────────────────────────────────────────────────────
 
 async function waitForIdle(
   client: OpencodeClient,
@@ -71,10 +89,10 @@ async function waitForIdle(
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
     const res = await client.session.status({ query: { directory } })
-    // The API returns { [sessionId]: SessionStatus } — not an array
+    // API returns { [sessionId]: SessionStatus }, not an array
     const statuses = (res.data ?? {}) as Record<string, { type: string }>
     const entry = statuses[sessionId]
-    // Session not found: either completed and removed, or never started — stop waiting
+    // Session not found: completed and removed, or never started — stop waiting
     if (!entry) return
     if (entry.type === "idle") return
     await sleep(500)
@@ -82,6 +100,6 @@ async function waitForIdle(
   throw new Error(`Session ${sessionId} timed out waiting for idle`)
 }
 
-function sleep(ms: number) {
+function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }

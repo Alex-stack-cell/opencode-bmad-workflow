@@ -1,8 +1,9 @@
 import { tool } from "@opencode-ai/plugin"
-import type { OpencodeClient } from "@opencode-ai/sdk"
-import { runAgentSession, getCurrentSessionId } from "../utils/session.ts"
+import { runAgentSession, withSession } from "../utils/session.ts"
 import { writeDoc, timestamp, formatDoc } from "../utils/files.ts"
-import type { WorkflowCtx } from "../utils/types.ts"
+import type { WorkflowCtx, WorkflowRunCtx } from "../utils/types.ts"
+
+// ─── Metadata ─────────────────────────────────────────────────────────────────
 
 export const meta = {
   name: "workflow_review",
@@ -11,8 +12,9 @@ export const meta = {
   generates: ".workflow/review-[date]/ANALYSIS.md, REVIEW.md",
 }
 
+// ─── Tool factory ─────────────────────────────────────────────────────────────
+
 export function createReviewTool(ctx: WorkflowCtx) {
-  const { client, directory } = ctx
   return tool({
     description:
       "Automated code review workflow: Analyst investigates → Reviewer writes the report. Docs saved in .workflow/",
@@ -22,28 +24,28 @@ export function createReviewTool(ctx: WorkflowCtx) {
         .optional()
         .describe("File or folder path to review (e.g. 'src/components/Button'). Leave empty to use the current git diff."),
     },
-    async execute(args) {
-      const sessionId = await getCurrentSessionId(client, directory)
-      return runReviewWorkflow({ client, sessionId, directory, scope: args.scope })
-    },
+    execute: (args) =>
+      withSession(ctx, (runCtx) =>
+        runReviewWorkflow({ ...runCtx, scope: args.scope }),
+      ),
   })
 }
 
-async function runReviewWorkflow(opts: {
-  client: OpencodeClient
-  sessionId: string
-  directory: string
-  scope?: string
-}): Promise<string> {
-  const { client, sessionId, directory, scope } = opts
+// ─── Workflow implementation ──────────────────────────────────────────────────
+
+type ReviewArgs = WorkflowRunCtx & { scope?: string }
+
+async function runReviewWorkflow({ scope, ...runCtx }: ReviewArgs): Promise<string> {
+  const { directory } = runCtx
   const docsDir = `.workflow/review-${timestamp()}`
+  const scopeLabel = scope ?? "full diff"
   const lines: string[] = []
 
   lines.push(`# Workflow: Code Review`)
   lines.push(`> Started at ${new Date().toISOString()}\n`)
 
   lines.push("## Step 1/2 — Analyst: Investigating code...")
-  const analystPrompt = `
+  const analysis = await runAgentSession(runCtx, "analyst", `
 Perform a deep technical analysis of the following code scope.
 ${scope ? `Scope: ${scope}` : "Scope: the current git diff / recent changes"}
 
@@ -56,14 +58,12 @@ Look for:
 - Test coverage gaps
 
 Be thorough and methodical. List all findings with file references.
-`.trim()
-
-  const analysis = await runAgentSession(client, sessionId, directory, "analyst", analystPrompt)
-  const analysisPath = await writeDoc(directory, `${docsDir}/ANALYSIS.md`, formatDoc("Code Analysis", scope ?? "full diff", analysis))
+`.trim())
+  const analysisPath = await writeDoc(directory, `${docsDir}/ANALYSIS.md`, formatDoc("Code Analysis", scopeLabel, analysis))
   lines.push(`   ✓ Analysis written → ${analysisPath}`)
 
   lines.push("## Step 2/2 — Reviewer: Writing review report...")
-  const reviewPrompt = `
+  const review = await runAgentSession(runCtx, "reviewer", `
 Based on this technical analysis, write a structured code review report.
 
 Analysis:
@@ -76,10 +76,8 @@ Format the report with:
 - LOW issues (suggestions)
 - APPROVED / CHANGES REQUESTED verdict
 - Summary of strengths
-`.trim()
-
-  const review = await runAgentSession(client, sessionId, directory, "reviewer", reviewPrompt)
-  const reviewPath = await writeDoc(directory, `${docsDir}/REVIEW.md`, formatDoc("Code Review Report", scope ?? "full diff", review))
+`.trim())
+  const reviewPath = await writeDoc(directory, `${docsDir}/REVIEW.md`, formatDoc("Code Review Report", scopeLabel, review))
   lines.push(`   ✓ Review written → ${reviewPath}`)
 
   lines.push(`\n## Done ✓`)

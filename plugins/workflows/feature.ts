@@ -1,8 +1,9 @@
 import { tool } from "@opencode-ai/plugin"
-import type { OpencodeClient } from "@opencode-ai/sdk"
-import { runAgentSession, getCurrentSessionId } from "../utils/session.ts"
+import { runAgentSession, withSession } from "../utils/session.ts"
 import { writeDoc, timestamp, formatDoc } from "../utils/files.ts"
-import type { WorkflowCtx } from "../utils/types.ts"
+import type { WorkflowCtx, WorkflowRunCtx } from "../utils/types.ts"
+
+// ─── Metadata ─────────────────────────────────────────────────────────────────
 
 export const meta = {
   name: "workflow_feature",
@@ -11,8 +12,9 @@ export const meta = {
   generates: ".workflow/[feature]/PRD.md, ARCHITECTURE.md, TASKS.md",
 }
 
+// ─── Tool factory ─────────────────────────────────────────────────────────────
+
 export function createFeatureTool(ctx: WorkflowCtx) {
-  const { client, directory } = ctx
   return tool({
     description:
       "Automated feature workflow: PM writes PRD → Architect designs architecture → PM breaks down tasks. Docs saved in .workflow/. IMPORTANT: Never call this tool without explicit feature_name and feature_description provided by the user. If either is missing, ask the user before calling.",
@@ -24,21 +26,19 @@ export function createFeatureTool(ctx: WorkflowCtx) {
         .string()
         .describe("Detailed description explicitly provided by the user. Never invent this."),
     },
-    async execute(args) {
-      const sessionId = await getCurrentSessionId(client, directory)
-      return runFeatureWorkflow({ client, sessionId, directory, featureName: args.feature_name, featureDescription: args.feature_description })
-    },
+    execute: (args) =>
+      withSession(ctx, (runCtx) =>
+        runFeatureWorkflow({ ...runCtx, featureName: args.feature_name, featureDescription: args.feature_description }),
+      ),
   })
 }
 
-async function runFeatureWorkflow(opts: {
-  client: OpencodeClient
-  sessionId: string
-  directory: string
-  featureName: string
-  featureDescription: string
-}): Promise<string> {
-  const { client, sessionId, directory, featureName, featureDescription } = opts
+// ─── Workflow implementation ──────────────────────────────────────────────────
+
+type FeatureArgs = WorkflowRunCtx & { featureName: string; featureDescription: string }
+
+async function runFeatureWorkflow({ featureName, featureDescription, ...runCtx }: FeatureArgs): Promise<string> {
+  const { directory } = runCtx
   const docsDir = `.workflow/${timestamp()}-${featureName.toLowerCase().replace(/\s+/g, "-")}`
   const lines: string[] = []
 
@@ -46,7 +46,7 @@ async function runFeatureWorkflow(opts: {
   lines.push(`> Started at ${new Date().toISOString()}\n`)
 
   lines.push("## Step 1/3 — PM: Writing PRD...")
-  const pmPrompt = `
+  const prd = await runAgentSession(runCtx, "pm", `
 Write a complete PRD for the following feature using BMAD methodology.
 
 Feature: ${featureName}
@@ -58,14 +58,12 @@ Include:
 - Acceptance criteria (Given/When/Then)
 - Out of scope
 - Technical notes
-`.trim()
-
-  const prd = await runAgentSession(client, sessionId, directory, "pm", pmPrompt)
+`.trim())
   const prdPath = await writeDoc(directory, `${docsDir}/PRD.md`, formatDoc("PRD", featureName, prd))
   lines.push(`   ✓ PRD written → ${prdPath}`)
 
   lines.push("## Step 2/3 — Architect: Designing architecture...")
-  const archPrompt = `
+  const arch = await runAgentSession(runCtx, "architect", `
 Based on this PRD, design the technical architecture.
 
 ${prd}
@@ -76,14 +74,12 @@ Produce:
 - Key technical decisions & tradeoffs
 - File/module structure suggestion
 - Risks & mitigations
-`.trim()
-
-  const arch = await runAgentSession(client, sessionId, directory, "architect", archPrompt)
+`.trim())
   const archPath = await writeDoc(directory, `${docsDir}/ARCHITECTURE.md`, formatDoc("Architecture", featureName, arch))
   lines.push(`   ✓ Architecture written → ${archPath}`)
 
   lines.push("## Step 3/3 — PM: Breaking down tasks...")
-  const tasksPrompt = `
+  const tasks = await runAgentSession(runCtx, "pm", `
 Based on this PRD and architecture, create a detailed task breakdown.
 
 PRD:
@@ -98,9 +94,7 @@ Format as a numbered task list with:
 - Estimated effort (S/M/L)
 - Dependencies (if any)
 - Best suited agent (frontend / architect / reviewer / analyst)
-`.trim()
-
-  const tasks = await runAgentSession(client, sessionId, directory, "pm", tasksPrompt)
+`.trim())
   const tasksPath = await writeDoc(directory, `${docsDir}/TASKS.md`, formatDoc("Task Breakdown", featureName, tasks))
   lines.push(`   ✓ Tasks written → ${tasksPath}`)
 
