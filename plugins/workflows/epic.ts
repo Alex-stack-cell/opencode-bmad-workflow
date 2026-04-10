@@ -1,6 +1,6 @@
 import { tool } from "@opencode-ai/plugin"
 import { runAgentSession, withSession } from "../utils/session.ts"
-import { writeDoc, formatDoc } from "../utils/files.ts"
+import { writeDoc, readDoc, formatDoc } from "../utils/files.ts"
 import { readdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 import type { WorkflowCtx, WorkflowRunCtx } from "../utils/types.ts"
@@ -10,7 +10,7 @@ import type { WorkflowCtx, WorkflowRunCtx } from "../utils/types.ts"
 export const meta = {
   name: "workflow_epic",
   summary: "New epic",
-  chain: "PM (scope)",
+  chain: "PM (scope) → updates project-documentation/OVERVIEW.md",
   generates: ".workflow/epics/[epic].md",
 }
 
@@ -35,7 +35,7 @@ export function createEpicsTool(ctx: WorkflowCtx) {
 export function createEpicTool(ctx: WorkflowCtx) {
   return tool({
     description:
-      "Automated epic workflow: PM defines scope and goals → PM suggests features to implement. Docs saved in .workflow/epics/. IMPORTANT: Never call this tool without explicit epic_name and epic_goal provided by the user. If either is missing, ask the user before calling.",
+      "Automated epic workflow: PM defines scope and goals. Updates project-documentation/OVERVIEW.md. IMPORTANT: Never call this tool without explicit epic_name and epic_goal provided by the user. If either is missing, ask the user before calling.",
     args: {
       epic_name: tool.schema
         .string()
@@ -104,11 +104,13 @@ async function runEpicWorkflow({ epicName, epicGoal, ...runCtx }: EpicArgs): Pro
   const { directory } = runCtx
   const slug = epicName.toLowerCase().replace(/\s+/g, "-")
   const epicsDir = `.workflow/epics`
+  const overviewPath = `project-documentation/OVERVIEW.md`
   const lines: string[] = []
 
   lines.push(`# Workflow: Epic — ${epicName}`)
   lines.push(`> Started at ${new Date().toISOString()}\n`)
 
+  // ── Step 1: PM defines the epic ──────────────────────────────────────────────
   lines.push("## PM: Defining epic scope...")
   const epicDef = await runAgentSession(runCtx, "pm", `
 Define a high-level epic using BMAD methodology.
@@ -125,11 +127,34 @@ Include:
 - Rough effort estimate (weeks/sprints)
 - Priority (HIGH / MEDIUM / LOW)
 `.trim())
-  const epicPath = await writeDoc(directory, `${epicsDir}/${slug}.md`, formatDoc("Epic", epicName, epicDef))
-  lines.push(`   ✓ Epic written → ${epicPath}`)
+  const epicFilePath = await writeDoc(directory, `${epicsDir}/${slug}.md`, formatDoc("Epic", epicName, epicDef))
+  lines.push(`   ✓ Epic written → ${epicFilePath}`)
+
+  // ── Step 2: Update project-documentation/OVERVIEW.md ─────────────────────────
+  lines.push("## Updating project documentation...")
+  const existingOverview = await readDoc(directory, overviewPath)
+  const updatedOverview = await runAgentSession(runCtx, "pm", `
+Update the project overview document to include this new epic.
+
+${existingOverview
+  ? `Existing OVERVIEW.md:\n${existingOverview}\n\n---\n\nAdd or update the section for this epic. Keep all existing content intact.`
+  : `No overview exists yet. Create a project overview document from scratch.`}
+
+New epic:
+${epicDef}
+
+The document should:
+- Start with a brief project overview (what this project is, its purpose)
+- List all epics with their status, priority, and one-line description
+- Be concise and useful for a new developer joining the project
+`.trim())
+  const overviewFilePath = await writeDoc(directory, overviewPath, updatedOverview)
+  lines.push(`   ✓ Overview updated → ${overviewFilePath}`)
 
   lines.push(`\n## Done ✓`)
-  lines.push(`Epic saved in \`${epicsDir}/${slug}.md\`.`)
+  lines.push(`Generated:`)
+  lines.push(`  - ${epicsDir}/${slug}.md`)
+  lines.push(`  - ${overviewPath}`)
   lines.push(`\nReview the epic, then use \`workflow_feature\` for each feature you want to implement.`)
 
   return lines.join("\n")

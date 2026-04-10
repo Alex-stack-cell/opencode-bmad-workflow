@@ -1,5 +1,14 @@
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, writeFile, readFile } from "node:fs/promises"
 import { join, dirname } from "node:path"
+
+/** Reads an existing project doc, returns its content or "" if it doesn't exist yet. */
+export async function readDoc(projectDir: string, relativePath: string): Promise<string> {
+  try {
+    return await readFile(join(projectDir, relativePath), "utf-8")
+  } catch {
+    return ""
+  }
+}
 
 export async function writeDoc(
   projectDir: string,

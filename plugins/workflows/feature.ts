@@ -1,6 +1,7 @@
 import { tool } from "@opencode-ai/plugin"
+import type { OpencodeClient } from "@opencode-ai/sdk"
 import { runAgentSession, withSession } from "../utils/session.ts"
-import { writeDoc, timestamp, formatDoc } from "../utils/files.ts"
+import { writeDoc, readDoc, timestamp, formatDoc } from "../utils/files.ts"
 import type { WorkflowCtx, WorkflowRunCtx } from "../utils/types.ts"
 
 // ─── Metadata ─────────────────────────────────────────────────────────────────
@@ -8,8 +9,8 @@ import type { WorkflowCtx, WorkflowRunCtx } from "../utils/types.ts"
 export const meta = {
   name: "workflow_feature",
   summary: "New feature",
-  chain: "PM (PRD) → Architect (architecture) → PM (tasks)",
-  generates: ".workflow/[feature]/PRD.md, ARCHITECTURE.md, TASKS.md",
+  chain: "PM (PRD) → Architect (architecture) → PM (tasks) → updates project-documentation/",
+  generates: ".workflow/[feature]/PRD.md, ARCHITECTURE.md, TASKS.md + project-documentation/",
 }
 
 // ─── Tool factory ─────────────────────────────────────────────────────────────
@@ -17,7 +18,7 @@ export const meta = {
 export function createFeatureTool(ctx: WorkflowCtx) {
   return tool({
     description:
-      "Automated feature workflow: PM writes PRD → Architect designs architecture → PM breaks down tasks. Docs saved in .workflow/. IMPORTANT: Never call this tool without explicit feature_name and feature_description provided by the user. If either is missing, ask the user before calling.",
+      "Automated feature workflow: PM writes PRD → Architect designs architecture → PM breaks down tasks. Updates project-documentation/. IMPORTANT: Never call this tool without explicit feature_name and feature_description provided by the user. If either is missing, ask the user before calling.",
     args: {
       feature_name: tool.schema
         .string()
@@ -39,12 +40,14 @@ type FeatureArgs = WorkflowRunCtx & { featureName: string; featureDescription: s
 
 async function runFeatureWorkflow({ featureName, featureDescription, ...runCtx }: FeatureArgs): Promise<string> {
   const { directory } = runCtx
-  const docsDir = `.workflow/${timestamp()}-${featureName.toLowerCase().replace(/\s+/g, "-")}`
+  const slug = featureName.toLowerCase().replace(/\s+/g, "-")
+  const docsDir = `.workflow/${timestamp()}-${slug}`
   const lines: string[] = []
 
   lines.push(`# Workflow: ${featureName}`)
   lines.push(`> Started at ${new Date().toISOString()}\n`)
 
+  // ── Step 1: PM writes PRD ─────────────────────────────────────────────────────
   lines.push("## Step 1/3 — PM: Writing PRD...")
   const prd = await runAgentSession(runCtx, "pm", `
 Write a complete PRD for the following feature using BMAD methodology.
@@ -62,6 +65,7 @@ Include:
   const prdPath = await writeDoc(directory, `${docsDir}/PRD.md`, formatDoc("PRD", featureName, prd))
   lines.push(`   ✓ PRD written → ${prdPath}`)
 
+  // ── Step 2: Architect designs architecture ────────────────────────────────────
   lines.push("## Step 2/3 — Architect: Designing architecture...")
   const arch = await runAgentSession(runCtx, "architect", `
 Based on this PRD, design the technical architecture.
@@ -78,6 +82,7 @@ Produce:
   const archPath = await writeDoc(directory, `${docsDir}/ARCHITECTURE.md`, formatDoc("Architecture", featureName, arch))
   lines.push(`   ✓ Architecture written → ${archPath}`)
 
+  // ── Step 3: PM breaks down tasks ─────────────────────────────────────────────
   lines.push("## Step 3/3 — PM: Breaking down tasks...")
   const tasks = await runAgentSession(runCtx, "pm", `
 Based on this PRD and architecture, create a detailed task breakdown.
@@ -98,11 +103,55 @@ Format as a numbered task list with:
   const tasksPath = await writeDoc(directory, `${docsDir}/TASKS.md`, formatDoc("Task Breakdown", featureName, tasks))
   lines.push(`   ✓ Tasks written → ${tasksPath}`)
 
+  // ── Step 4: Update project-documentation/ ────────────────────────────────────
+  lines.push("## Updating project documentation...")
+
+  const existingArch = await readDoc(directory, "project-documentation/ARCHITECTURE.md")
+  const updatedArch = await runAgentSession(runCtx, "architect", `
+Update the global architecture document to include decisions made for this feature.
+
+${existingArch
+  ? `Existing ARCHITECTURE.md:\n${existingArch}\n\n---\n\nAdd a section for this feature. Keep all existing content intact.`
+  : `No architecture document exists yet. Create one from scratch.`}
+
+Feature architecture:
+${arch}
+
+The document should:
+- Give a global view of the system architecture
+- Have one section per feature with key decisions and tradeoffs
+- Be useful for a new developer understanding the codebase
+`.trim())
+  const globalArchPath = await writeDoc(directory, "project-documentation/ARCHITECTURE.md", updatedArch)
+  lines.push(`   ✓ Architecture updated → ${globalArchPath}`)
+
+  const featureDoc = await runAgentSession(runCtx, "pm", `
+Write a concise feature documentation page for a developer reference guide.
+
+Feature: ${featureName}
+PRD:
+${prd}
+
+Architecture:
+${arch}
+
+Include:
+- One-paragraph description of what this feature does and why
+- Key user stories (condensed)
+- Technical summary (how it works, key components)
+- Acceptance criteria (condensed)
+`.trim())
+  const featureDocPath = await writeDoc(directory, `project-documentation/features/${slug}.md`, featureDoc)
+  lines.push(`   ✓ Feature doc written → ${featureDocPath}`)
+
   lines.push(`\n## Done ✓`)
-  lines.push(`Generated docs in \`${docsDir}/\`:`)
+  lines.push(`Workflow artifacts in \`${docsDir}/\`:`)
   lines.push(`  - PRD.md`)
   lines.push(`  - ARCHITECTURE.md`)
   lines.push(`  - TASKS.md`)
+  lines.push(`Project documentation updated:`)
+  lines.push(`  - project-documentation/ARCHITECTURE.md`)
+  lines.push(`  - project-documentation/features/${slug}.md`)
   lines.push(`\nYou can now continue manually or run \`workflow_review\` after implementation.`)
 
   return lines.join("\n")
