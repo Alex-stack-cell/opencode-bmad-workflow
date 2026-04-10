@@ -38,6 +38,16 @@ export async function withSession<T>(
 const DIRECT_OUTPUT_INSTRUCTION =
   "IMPORTANT: Respond with plain text only. Do NOT use any tools or function calls. Write the content directly.\n\n"
 
+/** Workflow tool names to disable in child sessions to prevent recursion. */
+const WORKFLOW_TOOLS_DISABLED: Record<string, boolean> = {
+  workflow_init: false,
+  workflow_epics: false,
+  workflow_epic: false,
+  workflow_feature: false,
+  workflow_sprint: false,
+  workflow_review: false,
+}
+
 export async function runAgentSession(
   runCtx: WorkflowRunCtx,
   agentName: string,
@@ -56,7 +66,11 @@ export async function runAgentSession(
 
   await client.session.prompt({
     path: { id: sessionId },
-    body: { agent: agentName, parts: [{ type: "text", text: DIRECT_OUTPUT_INSTRUCTION + prompt }] },
+    body: {
+      agent: agentName,
+      tools: WORKFLOW_TOOLS_DISABLED,
+      parts: [{ type: "text", text: DIRECT_OUTPUT_INSTRUCTION + prompt }],
+    },
     query: { directory },
   })
 
