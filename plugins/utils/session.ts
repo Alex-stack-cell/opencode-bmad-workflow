@@ -1,5 +1,13 @@
 import type { OpencodeClient } from "@opencode-ai/sdk"
 
+export async function getCurrentSessionId(client: OpencodeClient, directory: string): Promise<string> {
+  const res = await client.session.list({ query: { directory } })
+  const sessions = (res.data ?? []) as Array<{ id: string; parentID?: string }>
+  const root = sessions.filter((s) => !s.parentID).at(-1) ?? sessions.at(-1)
+  if (!root) throw new Error("No active session found")
+  return root.id
+}
+
 /**
  * Run a prompt in a child session using a specific agent.
  * Waits for the session to become idle, then returns the last assistant text.
@@ -58,17 +66,17 @@ async function waitForIdle(
   client: OpencodeClient,
   sessionId: string,
   directory: string,
-  timeoutMs = 2 * 60 * 1000,
+  timeoutMs = 5 * 60 * 1000,
 ): Promise<void> {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
     const res = await client.session.status({ query: { directory } })
-    const raw = res.data as unknown
-    const statuses: Array<{ id: string; status: string }> = Array.isArray(raw) ? raw : []
-    const entry = statuses.find((s) => s.id === sessionId)
+    // The API returns { [sessionId]: SessionStatus } — not an array
+    const statuses = (res.data ?? {}) as Record<string, { type: string }>
+    const entry = statuses[sessionId]
+    // Session not found: either completed and removed, or never started — stop waiting
     if (!entry) return
-    const busyStatuses = ["running", "busy", "pending", "loading"]
-    if (!busyStatuses.includes(entry.status)) return
+    if (entry.type === "idle") return
     await sleep(500)
   }
   throw new Error(`Session ${sessionId} timed out waiting for idle`)
