@@ -36,7 +36,7 @@ export async function withSession<T>(
  * @returns last assistant text message, or "" if none
  */
 const DIRECT_OUTPUT_INSTRUCTION =
-  "IMPORTANT: Respond with plain text only. Do NOT use any tools or function calls. Write the content directly.\n\n"
+  "IMPORTANT: All required inputs are already provided below. Do NOT ask the user for anything. Do NOT use any tools or function calls. Write the requested content directly as plain text.\n\n"
 
 export async function runAgentSession(
   runCtx: WorkflowRunCtx,
