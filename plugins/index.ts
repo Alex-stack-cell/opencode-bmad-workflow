@@ -22,7 +22,7 @@ function buildInitText(): string {
     lines.push(`   Generates: ${m.generates}\n`)
   }
   lines.push("---")
-  lines.push("All docs are saved in `.workflow/` at the project root.")
+  lines.push("All docs are saved in `ai-artifacts/` at the project root.")
   lines.push("Start with `workflow_epics` to see your roadmap, or `workflow_epic` to create your first epic.")
   return lines.join("\n")
 }

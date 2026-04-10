@@ -9,8 +9,8 @@ import type { WorkflowCtx, WorkflowRunCtx } from "../utils/types.ts"
 export const meta = {
   name: "workflow_feature",
   summary: "New feature",
-  chain: "PM (PRD) → Architect (architecture) → PM (tasks) → updates project-documentation/",
-  generates: ".workflow/[feature]/PRD.md, ARCHITECTURE.md, TASKS.md + project-documentation/",
+  chain: "PM (PRD) → Architect (architecture) → PM (tasks) → updates docs/",
+  generates: "ai-artifacts/[feature]/PRD.md, ARCHITECTURE.md, TASKS.md + docs/",
 }
 
 // ─── Tool factory ─────────────────────────────────────────────────────────────
@@ -18,7 +18,7 @@ export const meta = {
 export function createFeatureTool(ctx: WorkflowCtx) {
   return tool({
     description:
-      "Automated feature workflow: PM writes PRD → Architect designs architecture → PM breaks down tasks. Updates project-documentation/. IMPORTANT: Never call this tool without explicit feature_name and feature_description provided by the user. If either is missing, ask the user before calling.",
+      "Automated feature workflow: PM writes PRD → Architect designs architecture → PM breaks down tasks. Updates docs/. IMPORTANT: Never call this tool without explicit feature_name and feature_description provided by the user. If either is missing, ask the user before calling.",
     args: {
       feature_name: tool.schema
         .string()
@@ -41,7 +41,7 @@ type FeatureArgs = WorkflowRunCtx & { featureName: string; featureDescription: s
 async function runFeatureWorkflow({ featureName, featureDescription, ...runCtx }: FeatureArgs): Promise<string> {
   const { directory } = runCtx
   const slug = featureName.toLowerCase().replace(/\s+/g, "-")
-  const docsDir = `.workflow/${timestamp()}-${slug}`
+  const docsDir = `ai-artifacts/${timestamp()}-${slug}`
   const lines: string[] = []
 
   lines.push(`# Workflow: ${featureName}`)
@@ -103,10 +103,10 @@ Format as a numbered task list with:
   const tasksPath = await writeDoc(directory, `${docsDir}/TASKS.md`, formatDoc("Task Breakdown", featureName, tasks))
   lines.push(`   ✓ Tasks written → ${tasksPath}`)
 
-  // ── Step 4: Update project-documentation/ ────────────────────────────────────
+  // ── Step 4: Update docs/ ────────────────────────────────────
   lines.push("## Updating project documentation...")
 
-  const existingArch = await readDoc(directory, "project-documentation/ARCHITECTURE.md")
+  const existingArch = await readDoc(directory, "docs/ARCHITECTURE.md")
   const updatedArch = await runAgentSession(runCtx, "architect", `
 Update the global architecture document to include decisions made for this feature.
 
@@ -122,7 +122,7 @@ The document should:
 - Have one section per feature with key decisions and tradeoffs
 - Be useful for a new developer understanding the codebase
 `.trim())
-  const globalArchPath = await writeDoc(directory, "project-documentation/ARCHITECTURE.md", updatedArch)
+  const globalArchPath = await writeDoc(directory, "docs/ARCHITECTURE.md", updatedArch)
   lines.push(`   ✓ Architecture updated → ${globalArchPath}`)
 
   const featureDoc = await runAgentSession(runCtx, "pm", `
@@ -141,7 +141,7 @@ Include:
 - Technical summary (how it works, key components)
 - Acceptance criteria (condensed)
 `.trim())
-  const featureDocPath = await writeDoc(directory, `project-documentation/features/${slug}.md`, featureDoc)
+  const featureDocPath = await writeDoc(directory, `docs/features/${slug}.md`, featureDoc)
   lines.push(`   ✓ Feature doc written → ${featureDocPath}`)
 
   lines.push(`\n## Done ✓`)
@@ -150,8 +150,8 @@ Include:
   lines.push(`  - ARCHITECTURE.md`)
   lines.push(`  - TASKS.md`)
   lines.push(`Project documentation updated:`)
-  lines.push(`  - project-documentation/ARCHITECTURE.md`)
-  lines.push(`  - project-documentation/features/${slug}.md`)
+  lines.push(`  - docs/ARCHITECTURE.md`)
+  lines.push(`  - docs/features/${slug}.md`)
   lines.push(`\nYou can now continue manually or run \`workflow_review\` after implementation.`)
 
   return lines.join("\n")

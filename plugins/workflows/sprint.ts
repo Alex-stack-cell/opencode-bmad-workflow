@@ -9,7 +9,7 @@ export const meta = {
   name: "workflow_sprint",
   summary: "Sprint planning",
   chain: "PM (plan) → PM (stories)",
-  generates: ".workflow/sprint-[date]/SPRINT-PLAN.md, STORIES.md",
+  generates: "ai-artifacts/sprint-[date]/SPRINT-PLAN.md, STORIES.md",
 }
 
 // ─── Tool factory ─────────────────────────────────────────────────────────────
@@ -17,7 +17,7 @@ export const meta = {
 export function createSprintTool(ctx: WorkflowCtx) {
   return tool({
     description:
-      "Automated sprint planning workflow: PM creates the sprint plan → PM writes detailed user stories. Docs saved in .workflow/. IMPORTANT: Never call this tool without explicit sprint_goal provided by the user. If missing, ask the user before calling.",
+      "Automated sprint planning workflow: PM creates the sprint plan → PM writes detailed user stories. Docs saved in ai-artifacts/. IMPORTANT: Never call this tool without explicit sprint_goal provided by the user. If missing, ask the user before calling.",
     args: {
       sprint_goal: tool.schema
         .string()
@@ -40,7 +40,7 @@ type SprintArgs = WorkflowRunCtx & { sprintGoal: string; durationWeeks?: number 
 
 async function runSprintWorkflow({ sprintGoal, durationWeeks = 2, ...runCtx }: SprintArgs): Promise<string> {
   const { directory } = runCtx
-  const docsDir = `.workflow/sprint-${timestamp()}`
+  const docsDir = `ai-artifacts/sprint-${timestamp()}`
   const lines: string[] = []
 
   lines.push(`# Workflow: Sprint Planning`)

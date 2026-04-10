@@ -9,7 +9,7 @@ export const meta = {
   name: "workflow_review",
   summary: "Code review",
   chain: "Analyst (analysis) → Reviewer (report)",
-  generates: ".workflow/review-[date]/ANALYSIS.md, REVIEW.md",
+  generates: "ai-artifacts/review-[date]/ANALYSIS.md, REVIEW.md",
 }
 
 // ─── Tool factory ─────────────────────────────────────────────────────────────
@@ -17,7 +17,7 @@ export const meta = {
 export function createReviewTool(ctx: WorkflowCtx) {
   return tool({
     description:
-      "Automated code review workflow: Analyst investigates → Reviewer writes the report. Docs saved in .workflow/",
+      "Automated code review workflow: Analyst investigates → Reviewer writes the report. Docs saved in ai-artifacts/",
     args: {
       scope: tool.schema
         .string()
@@ -37,7 +37,7 @@ type ReviewArgs = WorkflowRunCtx & { scope?: string }
 
 async function runReviewWorkflow({ scope, ...runCtx }: ReviewArgs): Promise<string> {
   const { directory } = runCtx
-  const docsDir = `.workflow/review-${timestamp()}`
+  const docsDir = `ai-artifacts/review-${timestamp()}`
   const scopeLabel = scope ?? "full diff"
   const lines: string[] = []
 

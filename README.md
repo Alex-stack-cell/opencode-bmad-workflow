@@ -14,7 +14,7 @@ Brings structured BMAD methodology into opencode through 5 automated workflows:
 | `workflow_sprint` | PM → PM (stories) | Sprint plan + User stories |
 | `workflow_review` | Analyst → Reviewer | Analysis + Review report |
 
-All generated docs are saved in `.workflow/` at your project root.
+All generated docs are saved in `ai-artifacts/` at your project root.
 
 Two modes are available:
 - **Plugin tools** (`workflow_*`) — fully automated, no interruptions

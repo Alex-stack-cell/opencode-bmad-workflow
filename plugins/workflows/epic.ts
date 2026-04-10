@@ -10,8 +10,8 @@ import type { WorkflowCtx, WorkflowRunCtx } from "../utils/types.ts"
 export const meta = {
   name: "workflow_epic",
   summary: "New epic",
-  chain: "PM (scope) → updates project-documentation/OVERVIEW.md",
-  generates: ".workflow/epics/[epic].md",
+  chain: "PM (scope) → updates docs/OVERVIEW.md",
+  generates: "ai-artifacts/epics/[epic].md",
 }
 
 export const metaOverview = {
@@ -26,7 +26,7 @@ export const metaOverview = {
 export function createEpicsTool(ctx: WorkflowCtx) {
   return tool({
     description:
-      "Show a roadmap overview: list all existing epics from .workflow/epics/ with their priority, effort, and inferred status.",
+      "Show a roadmap overview: list all existing epics from ai-artifacts/epics/ with their priority, effort, and inferred status.",
     args: {},
     execute: () => withSession(ctx, runEpicsOverview),
   })
@@ -35,7 +35,7 @@ export function createEpicsTool(ctx: WorkflowCtx) {
 export function createEpicTool(ctx: WorkflowCtx) {
   return tool({
     description:
-      "Automated epic workflow: PM defines scope and goals. Updates project-documentation/OVERVIEW.md. IMPORTANT: Never call this tool without explicit epic_name and epic_goal provided by the user. If either is missing, ask the user before calling.",
+      "Automated epic workflow: PM defines scope and goals. Updates docs/OVERVIEW.md. IMPORTANT: Never call this tool without explicit epic_name and epic_goal provided by the user. If either is missing, ask the user before calling.",
     args: {
       epic_name: tool.schema
         .string()
@@ -55,7 +55,7 @@ export function createEpicTool(ctx: WorkflowCtx) {
 
 async function runEpicsOverview(runCtx: WorkflowRunCtx): Promise<string> {
   const { directory } = runCtx
-  const epicsDir = join(directory, ".workflow/epics")
+  const epicsDir = join(directory, "ai-artifacts/epics")
   const lines: string[] = []
 
   lines.push("# Epic Roadmap Overview")
@@ -66,11 +66,11 @@ async function runEpicsOverview(runCtx: WorkflowRunCtx): Promise<string> {
     const entries = await readdir(epicsDir)
     epicFiles = entries.filter((f) => f.endsWith(".md") && !f.includes("-features"))
   } catch {
-    return [...lines, "No epics found yet in `.workflow/epics/`.\n", "Use `workflow_epic` to create your first epic."].join("\n")
+    return [...lines, "No epics found yet in `ai-artifacts/epics/`.\n", "Use `workflow_epic` to create your first epic."].join("\n")
   }
 
   if (epicFiles.length === 0) {
-    return [...lines, "No epics found yet in `.workflow/epics/`.\n", "Use `workflow_epic` to create your first epic."].join("\n")
+    return [...lines, "No epics found yet in `ai-artifacts/epics/`.\n", "Use `workflow_epic` to create your first epic."].join("\n")
   }
 
   const epicContents: string[] = []
@@ -103,8 +103,8 @@ type EpicArgs = WorkflowRunCtx & { epicName: string; epicGoal: string }
 async function runEpicWorkflow({ epicName, epicGoal, ...runCtx }: EpicArgs): Promise<string> {
   const { directory } = runCtx
   const slug = epicName.toLowerCase().replace(/\s+/g, "-")
-  const epicsDir = `.workflow/epics`
-  const overviewPath = `project-documentation/OVERVIEW.md`
+  const epicsDir = `ai-artifacts/epics`
+  const overviewPath = `docs/OVERVIEW.md`
   const lines: string[] = []
 
   lines.push(`# Workflow: Epic — ${epicName}`)
@@ -130,7 +130,7 @@ Include:
   const epicFilePath = await writeDoc(directory, `${epicsDir}/${slug}.md`, formatDoc("Epic", epicName, epicDef))
   lines.push(`   ✓ Epic written → ${epicFilePath}`)
 
-  // ── Step 2: Update project-documentation/OVERVIEW.md ─────────────────────────
+  // ── Step 2: Update docs/OVERVIEW.md ─────────────────────────
   lines.push("## Updating project documentation...")
   const existingOverview = await readDoc(directory, overviewPath)
   const updatedOverview = await runAgentSession(runCtx, "pm", `
