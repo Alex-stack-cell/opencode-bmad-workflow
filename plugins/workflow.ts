@@ -97,12 +97,12 @@ Start with \`workflow_epics\` to see your roadmap, or \`workflow_epic\` to creat
       // ─────────────────────────────────────────────────────────────────────
       workflow_feature: tool({
         description:
-          "Automated feature workflow: PM writes PRD → Architect designs architecture → PM breaks down tasks. Docs saved in .workflow/",
+          "Automated feature workflow: PM writes PRD → Architect designs architecture → PM breaks down tasks. Docs saved in .workflow/. IMPORTANT: Never call this tool without explicit feature_name and feature_description provided by the user. If either is missing, ask the user before calling.",
         args: {
-          feature_name: tool.schema.string().describe("Short feature name (e.g. 'User login')"),
+          feature_name: tool.schema.string().describe("Short feature name explicitly provided by the user. Never invent this."),
           feature_description: tool.schema
             .string()
-            .describe("Detailed description of what the feature should do and why"),
+            .describe("Detailed description explicitly provided by the user. Never invent this."),
         },
         async execute(args) {
           const sessionId = await getCurrentSessionId(client, directory)
