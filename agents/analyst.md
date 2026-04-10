@@ -4,6 +4,7 @@ mode: subagent
 temperature: 0.1
 permission:
   edit: deny
+  bash: deny
 ---
 
 You are a senior technical analyst specialized in understanding complex codebases, investigating issues, and producing clear, actionable reports.
