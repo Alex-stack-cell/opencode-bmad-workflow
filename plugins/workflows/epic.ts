@@ -10,8 +10,8 @@ import type { WorkflowCtx, WorkflowRunCtx } from "../utils/types.ts"
 export const meta = {
   name: "workflow_epic",
   summary: "New epic",
-  chain: "PM (scope) → PM (features)",
-  generates: ".workflow/epics/[epic].md, [epic]-features.md",
+  chain: "PM (scope)",
+  generates: ".workflow/epics/[epic].md",
 }
 
 export const metaOverview = {
@@ -109,7 +109,7 @@ async function runEpicWorkflow({ epicName, epicGoal, ...runCtx }: EpicArgs): Pro
   lines.push(`# Workflow: Epic — ${epicName}`)
   lines.push(`> Started at ${new Date().toISOString()}\n`)
 
-  lines.push("## Step 1/2 — PM: Defining epic scope...")
+  lines.push("## PM: Defining epic scope...")
   const epicDef = await runAgentSession(runCtx, "pm", `
 Define a high-level epic using BMAD methodology.
 
@@ -119,7 +119,7 @@ Goal: ${epicGoal}
 Include:
 - Epic title and one-line description
 - Business value and strategic goal
-- List of features/stories that belong to this epic (high level, not detailed)
+- High-level list of potential features (not detailed, not exhaustive)
 - Success metrics (how do we know the epic is done?)
 - Dependencies on other epics
 - Rough effort estimate (weeks/sprints)
@@ -128,29 +128,9 @@ Include:
   const epicPath = await writeDoc(directory, `${epicsDir}/${slug}.md`, formatDoc("Epic", epicName, epicDef))
   lines.push(`   ✓ Epic written → ${epicPath}`)
 
-  lines.push("## Step 2/2 — PM: Suggesting features...")
-  const features = await runAgentSession(runCtx, "pm", `
-Based on this epic, suggest the concrete features to implement.
-
-${epicDef}
-
-For each feature:
-- Feature name (short, slug-friendly)
-- One-line description
-- User value
-- Effort estimate (S/M/L)
-- Priority within the epic
-
-Format as a prioritized list ready to be used with workflow_feature.
-`.trim())
-  const featuresPath = await writeDoc(directory, `${epicsDir}/${slug}-features.md`, formatDoc("Feature Suggestions", epicName, features))
-  lines.push(`   ✓ Features written → ${featuresPath}`)
-
   lines.push(`\n## Done ✓`)
-  lines.push(`Generated docs in \`${epicsDir}/\`:`)
-  lines.push(`  - ${slug}.md`)
-  lines.push(`  - ${slug}-features.md`)
-  lines.push(`\nUse \`workflow_feature\` to implement each feature, referencing epic: "${epicName}".`)
+  lines.push(`Epic saved in \`${epicsDir}/${slug}.md\`.`)
+  lines.push(`\nReview the epic, then use \`workflow_feature\` for each feature you want to implement.`)
 
   return lines.join("\n")
 }
