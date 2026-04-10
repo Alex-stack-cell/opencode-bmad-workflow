@@ -146,9 +146,9 @@ Start with \`workflow_epics\` to see your roadmap, or \`workflow_epic\` to creat
       // ─────────────────────────────────────────────────────────────────────
       workflow_sprint: tool({
         description:
-          "Automated sprint planning workflow: PM creates the sprint plan → PM writes detailed user stories. Docs saved in .workflow/",
+          "Automated sprint planning workflow: PM creates the sprint plan → PM writes detailed user stories. Docs saved in .workflow/. IMPORTANT: Never call this tool without explicit sprint_goal provided by the user. If missing, ask the user before calling.",
         args: {
-          sprint_goal: tool.schema.string().describe("Sprint goal or theme (e.g. 'Implement authentication')"),
+          sprint_goal: tool.schema.string().describe("Sprint goal explicitly provided by the user. Never invent this."),
           duration_weeks: tool.schema
             .number()
             .optional()
