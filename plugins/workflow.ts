@@ -73,12 +73,12 @@ Start with \`workflow_epics\` to see your roadmap, or \`workflow_epic\` to creat
       // ─────────────────────────────────────────────────────────────────────
       workflow_epic: tool({
         description:
-          "Automated epic workflow: PM defines scope and goals → PM suggests features to implement. Docs saved in .workflow/epics/",
+          "Automated epic workflow: PM defines scope and goals → PM suggests features to implement. Docs saved in .workflow/epics/. IMPORTANT: Never call this tool without explicit epic_name and epic_goal provided by the user. If either is missing, ask the user before calling.",
         args: {
-          epic_name: tool.schema.string().describe("Short epic name (e.g. 'User Authentication')"),
+          epic_name: tool.schema.string().describe("Short epic name explicitly provided by the user (e.g. 'User Authentication'). Never invent this."),
           epic_goal: tool.schema
             .string()
-            .describe("Business goal of the epic and expected user value"),
+            .describe("Business goal explicitly provided by the user. Never invent this."),
         },
         async execute(args) {
           const sessionId = await getCurrentSessionId(client, directory)
