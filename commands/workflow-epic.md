@@ -1,46 +1,36 @@
 ---
-description: Create or manage an epic - PM defines scope and breaks it into features. Saves docs in ai-artifacts/epics/
+description: Create an epic interactively - preview before writing. Saves docs in ai-artifacts/epics/ and updates docs/
 agent: pm
 ---
 
 **IMPORTANT: If $ARGUMENTS is empty, you MUST stop immediately and ask the user:**
 - "What is the name of the epic?"
 - "What is the goal of the epic?"
-Do NOT proceed or invent an epic until the user provides both.
+- "What is the priority? (HIGH / MEDIUM / LOW)"
+Do NOT proceed until the user provides all three.
 
-Run the epic definition workflow for: $ARGUMENTS
+## Step 1 — Preview
 
-## Step 1 - PM: Define the epic
+Call `workflow_epic` with `dry_run: true` using the name, goal, and priority from: $ARGUMENTS
 
-Act as a senior PM using BMAD methodology. Define a high-level epic for: $ARGUMENTS
-
-An epic groups related features that together deliver a major business value.
-
-Include:
-- Epic title and one-line description
-- Business value and strategic goal
-- List of features/stories that belong to this epic (high level, not detailed)
-- Success metrics (how do we know the epic is done?)
-- Dependencies on other epics
-- Rough effort estimate (weeks/sprints)
-- Priority (HIGH / MEDIUM / LOW)
-
-Save in `ai-artifacts/epics/[epic-name].md`.
+Show the full preview returned by the tool.
 
 ---
 
-**CHECKPOINT — Stop here and show the epic definition to the user.**
+**CHECKPOINT — Stop here.**
 
 Ask:
 1. Does the epic scope look correct?
 2. Any features to add or remove?
-3. Any success metrics to adjust?
-4. Should we break this epic into features now?
+3. Does the effort estimate reasoning make sense?
+4. Anything to adjust before saving?
 
-If the user wants to break it into features: for each feature listed, suggest running `/workflow-feature [feature name] (part of epic: [epic name])`.
-
-Wait for explicit confirmation before closing the epic workflow.
+Wait for explicit confirmation before proceeding.
 
 ---
 
-List all existing epics found in `ai-artifacts/epics/` so the user has a full picture of the roadmap.
+## Step 2 — Save
+
+Call `workflow_epic` again with the same args but `dry_run: false`.
+
+Confirm which files were written and suggest running `/workflow-feature [feature name]` for each feature to implement.

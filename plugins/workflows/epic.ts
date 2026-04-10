@@ -35,18 +35,31 @@ export function createEpicsTool(ctx: WorkflowCtx) {
 export function createEpicTool(ctx: WorkflowCtx) {
   return tool({
     description:
-      "Automated epic workflow: PM defines scope and goals. Updates docs/OVERVIEW.md. IMPORTANT: Never call this tool without explicit epic_name and epic_goal provided by the user. If either is missing, ask the user before calling.",
+      "Epic workflow: PM defines scope and goals. Updates docs/OVERVIEW.md and docs/ROADMAP.md. Pass dry_run: true to preview generated content before writing. IMPORTANT: Never call this tool without explicit epic_name, epic_goal, and priority provided by the user.",
     args: {
       epic_name: tool.schema
         .string()
-        .describe("Short epic name explicitly provided by the user (e.g. 'User Authentication'). Never invent this."),
+        .describe("Short epic name explicitly provided by the user. Never invent this."),
       epic_goal: tool.schema
         .string()
         .describe("Business goal explicitly provided by the user. Never invent this."),
+      priority: tool.schema
+        .enum(["HIGH", "MEDIUM", "LOW"])
+        .describe("Priority explicitly provided by the user. Never invent this."),
+      dry_run: tool.schema
+        .boolean()
+        .optional()
+        .describe("If true, generate and return a preview without writing any files. Default: false."),
     },
     execute: (args) =>
       withSession(ctx, (runCtx) =>
-        runEpicWorkflow({ ...runCtx, epicName: args.epic_name, epicGoal: args.epic_goal }),
+        runEpicWorkflow({
+          ...runCtx,
+          epicName: args.epic_name,
+          epicGoal: args.epic_goal,
+          priority: args.priority,
+          dryRun: args.dry_run ?? false,
+        }),
       ),
   })
 }
@@ -98,21 +111,16 @@ Format as a prioritized table or list. End with a recommendation for which epic 
   return lines.join("\n")
 }
 
-type EpicArgs = WorkflowRunCtx & { epicName: string; epicGoal: string }
+type EpicArgs = WorkflowRunCtx & { epicName: string; epicGoal: string; priority: "HIGH" | "MEDIUM" | "LOW"; dryRun: boolean }
 
-async function runEpicWorkflow({ epicName, epicGoal, ...runCtx }: EpicArgs): Promise<string> {
+async function runEpicWorkflow({ epicName, epicGoal, priority, dryRun, ...runCtx }: EpicArgs): Promise<string> {
   const { directory } = runCtx
   const slug = epicName.toLowerCase().replace(/\s+/g, "-")
   const epicsDir = `ai-artifacts/epics`
   const overviewPath = `docs/OVERVIEW.md`
   const roadmapPath = `docs/ROADMAP.md`
-  const lines: string[] = []
 
-  lines.push(`# Workflow: Epic — ${epicName}`)
-  lines.push(`> Started at ${new Date().toISOString()}\n`)
-
-  // ── Step 1: PM defines the epic ──────────────────────────────────────────────
-  lines.push("## PM: Defining epic scope...")
+  // ── Generate epic definition ──────────────────────────────────────────────────
   const epicDef = await runAgentSession(runCtx, "pm", `
 Define a high-level epic using BMAD methodology.
 
@@ -124,18 +132,16 @@ Include:
 - Business value and strategic goal
 - High-level list of potential features (not detailed, not exhaustive)
 - Success metrics (how do we know the epic is done?)
-- Dependencies on other epics
-- Rough effort estimate (weeks/sprints)
-- Priority (HIGH / MEDIUM / LOW)
+- Dependencies on other epics (only list epics that are explicitly known — write "None identified" if unsure, do NOT invent epics)
+- Effort estimate: provide a rough duration WITH a justification explaining why based on the described scope. Clearly mark it as an estimate to be validated by the team.
+- Priority: ${priority} (set by the user — do not change this)
 `.trim())
-  const epicFilePath = await writeDoc(directory, `${epicsDir}/${slug}.md`, formatDoc("Epic", epicName, epicDef))
-  lines.push(`   ✓ Epic written → ${epicFilePath}`)
 
-  // ── Step 2: Generate OVERVIEW.md if it doesn't exist yet ─────────────────────
-  lines.push("## Updating project documentation...")
+  // ── Generate OVERVIEW.md content if needed ────────────────────────────────────
   const existingOverview = await readDoc(directory, overviewPath)
+  let overviewContent: string | null = null
   if (!existingOverview) {
-    const overview = await runAgentSession(runCtx, "pm", `
+    overviewContent = await runAgentSession(runCtx, "pm", `
 Create a concise project overview document based on the codebase context.
 
 Include:
@@ -147,11 +153,9 @@ Include:
 Do NOT include epics, roadmap, or planning information — that belongs in ROADMAP.md.
 Keep it stable: this document should rarely need to change.
 `.trim())
-    const overviewFilePath = await writeDoc(directory, overviewPath, overview)
-    lines.push(`   ✓ Overview created → ${overviewFilePath}`)
   }
 
-  // ── Step 3: Upsert ROADMAP.md with the new epic ───────────────────────────────
+  // ── Generate ROADMAP.md ───────────────────────────────────────────────────────
   const existingRoadmap = await readDoc(directory, roadmapPath)
   const updatedRoadmap = await runAgentSession(runCtx, "pm", `
 Update the project roadmap to include this new epic.
@@ -167,13 +171,48 @@ Format:
 - One section per epic with: status (TODO / IN PROGRESS / DONE), priority, one-line description, effort estimate
 - Keep it concise — this is a planning reference, not detailed documentation
 `.trim())
+
+  // ── Dry run: return preview without writing ───────────────────────────────────
+  if (dryRun) {
+    const lines: string[] = []
+    lines.push(`# Preview — Epic: ${epicName}`)
+    lines.push(`> This is a dry run. No files have been written.\n`)
+
+    lines.push(`## → ai-artifacts/epics/${slug}.md\n`)
+    lines.push(epicDef)
+
+    if (overviewContent) {
+      lines.push(`\n---\n\n## → docs/OVERVIEW.md (will be created)\n`)
+      lines.push(overviewContent)
+    }
+
+    lines.push(`\n---\n\n## → docs/ROADMAP.md (will be ${existingRoadmap ? "updated" : "created"})\n`)
+    lines.push(updatedRoadmap)
+
+    lines.push(`\n---\n\n> Call again with \`dry_run: false\` to write these files.`)
+    return lines.join("\n")
+  }
+
+  // ── Write files ───────────────────────────────────────────────────────────────
+  const lines: string[] = []
+  lines.push(`# Workflow: Epic — ${epicName}`)
+  lines.push(`> Started at ${new Date().toISOString()}\n`)
+
+  const epicFilePath = await writeDoc(directory, `${epicsDir}/${slug}.md`, formatDoc("Epic", epicName, epicDef))
+  lines.push(`   ✓ Epic written → ${epicFilePath}`)
+
+  if (overviewContent) {
+    const overviewFilePath = await writeDoc(directory, overviewPath, overviewContent)
+    lines.push(`   ✓ Overview created → ${overviewFilePath}`)
+  }
+
   const roadmapFilePath = await writeDoc(directory, roadmapPath, updatedRoadmap)
   lines.push(`   ✓ Roadmap updated → ${roadmapFilePath}`)
 
   lines.push(`\n## Done ✓`)
   lines.push(`Generated:`)
   lines.push(`  - ${epicsDir}/${slug}.md`)
-  if (!existingOverview) lines.push(`  - ${overviewPath} (created)`)
+  if (overviewContent) lines.push(`  - ${overviewPath} (created)`)
   lines.push(`  - ${roadmapPath}`)
   lines.push(`\nReview the epic, then use \`workflow_feature\` for each feature you want to implement.`)
 

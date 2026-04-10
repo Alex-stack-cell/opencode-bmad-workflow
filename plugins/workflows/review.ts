@@ -17,34 +17,38 @@ export const meta = {
 export function createReviewTool(ctx: WorkflowCtx) {
   return tool({
     description:
-      "Automated code review workflow: Analyst investigates → Reviewer writes the report. Docs saved in ai-artifacts/",
+      "Code review workflow: Analyst investigates → Reviewer writes the report. Pass dry_run: true to preview generated content before writing.",
     args: {
       scope: tool.schema
         .string()
         .optional()
         .describe("File or folder path to review (e.g. 'src/components/Button'). Leave empty to use the current git diff."),
+      dry_run: tool.schema
+        .boolean()
+        .optional()
+        .describe("If true, generate and return a preview without writing any files. Default: false."),
     },
     execute: (args) =>
       withSession(ctx, (runCtx) =>
-        runReviewWorkflow({ ...runCtx, scope: args.scope }),
+        runReviewWorkflow({
+          ...runCtx,
+          scope: args.scope,
+          dryRun: args.dry_run ?? false,
+        }),
       ),
   })
 }
 
 // ─── Workflow implementation ──────────────────────────────────────────────────
 
-type ReviewArgs = WorkflowRunCtx & { scope?: string }
+type ReviewArgs = WorkflowRunCtx & { scope?: string; dryRun: boolean }
 
-async function runReviewWorkflow({ scope, ...runCtx }: ReviewArgs): Promise<string> {
+async function runReviewWorkflow({ scope, dryRun, ...runCtx }: ReviewArgs): Promise<string> {
   const { directory } = runCtx
   const docsDir = `ai-artifacts/review-${timestamp()}`
   const scopeLabel = scope ?? "full diff"
-  const lines: string[] = []
 
-  lines.push(`# Workflow: Code Review`)
-  lines.push(`> Started at ${new Date().toISOString()}\n`)
-
-  lines.push("## Step 1/2 — Analyst: Investigating code...")
+  // ── Generate all content ──────────────────────────────────────────────────────
   const analysis = await runAgentSession(runCtx, "analyst", `
 Perform a deep technical analysis of the following code scope.
 ${scope ? `Scope: ${scope}` : "Scope: the current git diff / recent changes"}
@@ -59,10 +63,7 @@ Look for:
 
 Be thorough and methodical. List all findings with file references.
 `.trim())
-  const analysisPath = await writeDoc(directory, `${docsDir}/ANALYSIS.md`, formatDoc("Code Analysis", scopeLabel, analysis))
-  lines.push(`   ✓ Analysis written → ${analysisPath}`)
 
-  lines.push("## Step 2/2 — Reviewer: Writing review report...")
   const review = await runAgentSession(runCtx, "reviewer", `
 Based on this technical analysis, write a structured code review report.
 
@@ -77,6 +78,30 @@ Format the report with:
 - APPROVED / CHANGES REQUESTED verdict
 - Summary of strengths
 `.trim())
+
+  // ── Dry run: return preview without writing ───────────────────────────────────
+  if (dryRun) {
+    const lines: string[] = []
+    lines.push(`# Preview — Code Review: ${scopeLabel}`)
+    lines.push(`> This is a dry run. No files have been written.\n`)
+
+    lines.push(`## → ${docsDir}/ANALYSIS.md\n`)
+    lines.push(analysis)
+    lines.push(`\n---\n\n## → ${docsDir}/REVIEW.md\n`)
+    lines.push(review)
+
+    lines.push(`\n---\n\n> Call again with \`dry_run: false\` to write these files.`)
+    return lines.join("\n")
+  }
+
+  // ── Write files ───────────────────────────────────────────────────────────────
+  const lines: string[] = []
+  lines.push(`# Workflow: Code Review`)
+  lines.push(`> Started at ${new Date().toISOString()}\n`)
+
+  const analysisPath = await writeDoc(directory, `${docsDir}/ANALYSIS.md`, formatDoc("Code Analysis", scopeLabel, analysis))
+  lines.push(`   ✓ Analysis written → ${analysisPath}`)
+
   const reviewPath = await writeDoc(directory, `${docsDir}/REVIEW.md`, formatDoc("Code Review Report", scopeLabel, review))
   lines.push(`   ✓ Review written → ${reviewPath}`)
 

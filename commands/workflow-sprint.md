@@ -1,51 +1,35 @@
 ---
-description: Automated sprint planning - PM creates sprint plan, waits for validation, then writes detailed user stories. Saves docs in ai-artifacts/
+description: Plan a sprint interactively - preview before writing. Saves sprint plan and stories in ai-artifacts/
 agent: pm
 ---
 
-Run the sprint planning workflow in 2 steps for: $ARGUMENTS
+**IMPORTANT: If $ARGUMENTS is empty, you MUST stop immediately and ask the user:**
+- "What is the sprint goal or theme?"
+- "What is the sprint duration (in weeks)?"
+Do NOT proceed until the user provides both.
 
-## Step 1 - PM: Sprint plan
+## Step 1 — Preview
 
-Act as a senior PM using BMAD methodology. Create a sprint plan for: $ARGUMENTS
+Call `workflow_sprint` with `dry_run: true` using the goal and duration from: $ARGUMENTS
 
-Include:
-- Sprint goal statement
-- Prioritized user stories (in scope) — reference existing epics if any exist in `ai-artifacts/epics/`
-- Stories out of scope (backlog)
-- Definition of Done
-- Risks and blockers
-
-Save in `ai-artifacts/sprint-[date]/SPRINT-PLAN.md`.
+Show the full preview returned by the tool.
 
 ---
 
-**CHECKPOINT — Stop here and show the sprint plan to the user.**
+**CHECKPOINT — Stop here.**
 
 Ask:
 1. Does the sprint plan look correct?
 2. Any stories to add, remove, or reprioritize?
-3. Any effort estimates to adjust?
+3. Any user stories or acceptance criteria to refine?
+4. Anything to adjust before saving?
 
-Wait for explicit confirmation ("ok", "go", "continue") or adjustments before proceeding to Step 2.
-
----
-
-## Step 2 - PM: Detailed user stories
-
-Only run this step after the user has validated the sprint plan.
-
-Write complete user stories for each story confirmed in the sprint plan.
-
-For each story:
-- Full user story (As a / I want / So that)
-- Detailed acceptance criteria (Given/When/Then)
-- Technical notes for developers
-- Effort estimate (S/M/L)
-- Link to parent epic if applicable
-
-Save in `ai-artifacts/sprint-[date]/STORIES.md`.
+Wait for explicit confirmation before proceeding.
 
 ---
+
+## Step 2 — Save
+
+Call `workflow_sprint` again with the same args but `dry_run: false`.
 
 Summarize the planned stories and their total estimated effort.

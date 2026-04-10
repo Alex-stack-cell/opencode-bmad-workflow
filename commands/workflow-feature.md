@@ -1,82 +1,36 @@
 ---
-description: Automated feature workflow - PM writes PRD, Architect designs architecture, PM creates tasks. Saves docs in ai-artifacts/
+description: Create a feature interactively - preview before writing. Saves PRD, architecture, tasks in ai-artifacts/ and updates docs/
 agent: pm
 ---
 
-Run the feature creation workflow in 3 steps for: $ARGUMENTS
+**IMPORTANT: If $ARGUMENTS is empty, you MUST stop immediately and ask the user:**
+- "What is the name of the feature?"
+- "What is the description of the feature?"
+Do NOT proceed until the user provides both.
 
-## Step 1 - PM: Write the PRD
+## Step 1 — Preview
 
-Act as a senior PM using BMAD methodology. Write a complete PRD for: $ARGUMENTS
+Call `workflow_feature` with `dry_run: true` using the name and description from: $ARGUMENTS
 
-Check if a parent epic exists in `ai-artifacts/epics/` that this feature belongs to — if so, reference it.
-
-Include:
-- Overview and goals
-- Parent epic (if applicable)
-- User stories (As a / I want / So that)
-- Acceptance criteria (Given/When/Then)
-- Out of scope
-- Technical notes
-
-Save in `ai-artifacts/[feature-name]/PRD.md`.
+Show the full preview returned by the tool.
 
 ---
 
-**CHECKPOINT — Stop here and show the PRD to the user.**
+**CHECKPOINT — Stop here.**
 
 Ask:
 1. Does the PRD correctly capture the feature?
 2. Any user stories to add, remove, or adjust?
-3. Any acceptance criteria to refine?
+3. Does the architecture look correct?
+4. Any tasks to add, split, or remove?
+5. Anything to adjust before saving?
 
-Wait for explicit confirmation before proceeding to Step 2.
-
----
-
-## Step 2 - Architect: Design the architecture
-
-Only run after PRD is validated.
-
-Act as a senior software architect. Design the technical architecture based on the validated PRD.
-
-Include:
-- Component overview
-- Data flow
-- Key technical decisions and tradeoffs
-- File/module structure
-- Risks and mitigations
-
-Save in `ai-artifacts/[feature-name]/ARCHITECTURE.md`.
+Wait for explicit confirmation before proceeding.
 
 ---
 
-**CHECKPOINT — Stop here and show the architecture to the user.**
+## Step 2 — Save
 
-Ask:
-1. Does the architecture look correct?
-2. Any technical concerns or alternative approaches to consider?
+Call `workflow_feature` again with the same args but `dry_run: false`.
 
-Wait for explicit confirmation before proceeding to Step 3.
-
----
-
-## Step 3 - PM: Task breakdown
-
-Only run after architecture is validated.
-
-Act as a PM. Break the feature into concrete development tasks.
-
-For each task:
-- Title
-- Description (2-3 lines)
-- Effort estimate (S/M/L)
-- Dependencies
-- Best suited agent (frontend/architect/reviewer/analyst)
-- Parent epic reference if applicable
-
-Save in `ai-artifacts/[feature-name]/TASKS.md`.
-
----
-
-Confirm the 3 generated files and suggest which agent to use to start implementation.
+Confirm which files were written and suggest which agent to use to start implementation.
