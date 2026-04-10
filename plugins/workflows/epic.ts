@@ -140,12 +140,12 @@ ${existingOverview
   ? `Existing OVERVIEW.md:\n${existingOverview}\n\n---\n\nAdd or update the section for this epic. Keep all existing content intact.`
   : `No overview exists yet. Create a project overview document from scratch.`}
 
-New epic:
+New epic to add (this is the ONLY epic to add — do NOT invent other epics):
 ${epicDef}
 
 The document should:
 - Start with a brief project overview (what this project is, its purpose)
-- List all epics with their status, priority, and one-line description
+- List only epics that have been explicitly defined (do NOT invent or suggest new ones)
 - Be concise and useful for a new developer joining the project
 `.trim())
   const overviewFilePath = await writeDoc(directory, overviewPath, updatedOverview)
