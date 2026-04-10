@@ -15,7 +15,7 @@ Chain: PM defines scope → validates with user → suggests features.
 ## /workflow-feature [feature name and description]
 Full feature workflow with validation at each step.
 Chain: PM (PRD) → validate → Architect (architecture) → validate → PM (tasks).
-References parent epic if one exists in `.workflow/epics/`.
+References parent epic if one exists in `ai-artifacts/epics/`.
 
 ## /workflow-sprint [sprint goal]
 Sprint planning with validation before story writing.

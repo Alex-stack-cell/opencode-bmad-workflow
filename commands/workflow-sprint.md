@@ -1,5 +1,5 @@
 ---
-description: Automated sprint planning - PM creates sprint plan, waits for validation, then writes detailed user stories. Saves docs in .workflow/
+description: Automated sprint planning - PM creates sprint plan, waits for validation, then writes detailed user stories. Saves docs in ai-artifacts/
 agent: pm
 ---
 
@@ -11,12 +11,12 @@ Act as a senior PM using BMAD methodology. Create a sprint plan for: $ARGUMENTS
 
 Include:
 - Sprint goal statement
-- Prioritized user stories (in scope) — reference existing epics if any exist in `.workflow/epics/`
+- Prioritized user stories (in scope) — reference existing epics if any exist in `ai-artifacts/epics/`
 - Stories out of scope (backlog)
 - Definition of Done
 - Risks and blockers
 
-Save in `.workflow/sprint-[date]/SPRINT-PLAN.md`.
+Save in `ai-artifacts/sprint-[date]/SPRINT-PLAN.md`.
 
 ---
 
@@ -44,7 +44,7 @@ For each story:
 - Effort estimate (S/M/L)
 - Link to parent epic if applicable
 
-Save in `.workflow/sprint-[date]/STORIES.md`.
+Save in `ai-artifacts/sprint-[date]/STORIES.md`.
 
 ---
 

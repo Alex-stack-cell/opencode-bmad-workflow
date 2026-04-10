@@ -1,5 +1,5 @@
 ---
-description: Automated code review - Analyst investigates, Reviewer writes structured report. Saves docs in .workflow/
+description: Automated code review - Analyst investigates, Reviewer writes structured report. Saves docs in ai-artifacts/
 agent: analyst
 ---
 
@@ -15,7 +15,7 @@ Look for: logic errors and edge cases, performance issues, complexity hotspots, 
 
 Be methodical. List all findings with file references and line numbers.
 
-Save analysis in `.workflow/review-[date]/ANALYSIS.md`.
+Save analysis in `ai-artifacts/review-[date]/ANALYSIS.md`.
 
 ---
 
@@ -43,7 +43,7 @@ Format:
 - Verdict: APPROVED / CHANGES REQUESTED
 - Summary of strengths
 
-Save report in `.workflow/review-[date]/REVIEW.md`.
+Save report in `ai-artifacts/review-[date]/REVIEW.md`.
 
 ---
 

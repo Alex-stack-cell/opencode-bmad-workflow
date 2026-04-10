@@ -1,5 +1,5 @@
 ---
-description: Create or manage an epic - PM defines scope and breaks it into features. Saves docs in .workflow/epics/
+description: Create or manage an epic - PM defines scope and breaks it into features. Saves docs in ai-artifacts/epics/
 agent: pm
 ---
 
@@ -25,7 +25,7 @@ Include:
 - Rough effort estimate (weeks/sprints)
 - Priority (HIGH / MEDIUM / LOW)
 
-Save in `.workflow/epics/[epic-name].md`.
+Save in `ai-artifacts/epics/[epic-name].md`.
 
 ---
 
@@ -43,4 +43,4 @@ Wait for explicit confirmation before closing the epic workflow.
 
 ---
 
-List all existing epics found in `.workflow/epics/` so the user has a full picture of the roadmap.
+List all existing epics found in `ai-artifacts/epics/` so the user has a full picture of the roadmap.

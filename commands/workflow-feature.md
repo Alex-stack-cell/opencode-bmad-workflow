@@ -1,5 +1,5 @@
 ---
-description: Automated feature workflow - PM writes PRD, Architect designs architecture, PM creates tasks. Saves docs in .workflow/
+description: Automated feature workflow - PM writes PRD, Architect designs architecture, PM creates tasks. Saves docs in ai-artifacts/
 agent: pm
 ---
 
@@ -9,7 +9,7 @@ Run the feature creation workflow in 3 steps for: $ARGUMENTS
 
 Act as a senior PM using BMAD methodology. Write a complete PRD for: $ARGUMENTS
 
-Check if a parent epic exists in `.workflow/epics/` that this feature belongs to — if so, reference it.
+Check if a parent epic exists in `ai-artifacts/epics/` that this feature belongs to — if so, reference it.
 
 Include:
 - Overview and goals
@@ -19,7 +19,7 @@ Include:
 - Out of scope
 - Technical notes
 
-Save in `.workflow/[feature-name]/PRD.md`.
+Save in `ai-artifacts/[feature-name]/PRD.md`.
 
 ---
 
@@ -47,7 +47,7 @@ Include:
 - File/module structure
 - Risks and mitigations
 
-Save in `.workflow/[feature-name]/ARCHITECTURE.md`.
+Save in `ai-artifacts/[feature-name]/ARCHITECTURE.md`.
 
 ---
 
@@ -75,7 +75,7 @@ For each task:
 - Best suited agent (frontend/architect/reviewer/analyst)
 - Parent epic reference if applicable
 
-Save in `.workflow/[feature-name]/TASKS.md`.
+Save in `ai-artifacts/[feature-name]/TASKS.md`.
 
 ---
 
