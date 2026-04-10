@@ -6,39 +6,29 @@ A [BMAD](https://github.com/bmad-dev/bmad-method) workflow plugin for [opencode]
 
 Brings structured BMAD methodology into opencode through 5 automated workflows:
 
-| Workflow | Agent chain | Output |
-|----------|-------------|--------|
-| `workflow_epics` | Analyst reads epics | Roadmap overview |
-| `workflow_epic` | PM → PM (features) | Epic definition + feature list |
-| `workflow_feature` | PM → Architect → PM | PRD + Architecture + Task breakdown |
-| `workflow_sprint` | PM → PM (stories) | Sprint plan + User stories |
-| `workflow_review` | Analyst → Reviewer | Analysis + Review report |
+| Workflow | Agent chain | Artifacts | Living docs |
+|----------|-------------|-----------|-------------|
+| `workflow_epics` | Analyst | _(read-only)_ | — |
+| `workflow_epic` | PM | `ai-artifacts/epics/[epic].md` | `docs/OVERVIEW.md` |
+| `workflow_feature` | PM → Architect → PM | `ai-artifacts/[feature]/` | `docs/ARCHITECTURE.md`, `docs/features/[feature].md` |
+| `workflow_sprint` | PM → PM | `ai-artifacts/sprint-[date]/` | — |
+| `workflow_review` | Analyst → Reviewer | `ai-artifacts/review-[date]/` | — |
 
-All generated docs are saved in `ai-artifacts/` at your project root.
+Two output types:
+- **`ai-artifacts/`** — workflow artifacts (temporary, can be gitignored)
+- **`docs/`** — living project documentation, updated automatically, meant to be versioned with the code
 
-Two modes are available:
+Two invocation modes:
 - **Plugin tools** (`workflow_*`) — fully automated, no interruptions
 - **Slash commands** (`/workflow-*`) — semi-interactive, agents may ask for clarification
 
-> **Note on local models:** Local models like `qwen3-coder:30b` tend to skip checkpoints and generate directly. Always pass arguments explicitly to avoid hallucinations (see Usage below).
+> **Note on local models:** Local models tend to skip checkpoints and generate directly. Always pass arguments explicitly to avoid hallucinations (see Usage below).
 
 ## Requirements
 
 - [opencode](https://opencode.ai) 1.4.x or later
 - [Bun](https://bun.sh) or Node.js (for dependency installation)
-- Local models via [Ollama](https://ollama.ai) or any supported provider
-
-### Recommended models
-
-| Agent | Default model | Role |
-|-------|--------------|------|
-| `pm` | `qwen3-coder:30b` | PRD, user stories, sprint planning |
-| `architect` | `gemma4:e4b` | System design, architecture |
-| `analyst` | `gemma4:e4b` | Code analysis, investigation |
-| `reviewer` | `qwen3-coder:30b` | Code review reports |
-| `frontend` | `qwen3-coder:30b` | Frontend implementation |
-
-Any capable model works — adjust `model:` in each agent file to match what you have available.
+- Any model provider supported by opencode (Ollama, Anthropic, OpenAI, Google…)
 
 > **Important:** The model assigned to each agent must support tool calling. Models like `deepseek-r1` do not support tools and will fail in workflow sub-sessions.
 
@@ -83,8 +73,8 @@ Shows all available workflows and recommends where to start.
 
 ```
 workflow_epics      → see your roadmap
-workflow_epic       → define a new epic
-workflow_feature    → implement a feature
+workflow_epic       → define a new epic (updates docs/OVERVIEW.md)
+workflow_feature    → implement a feature (updates docs/ARCHITECTURE.md + docs/features/)
 workflow_sprint     → plan a sprint
 workflow_review     → review code before merging
 ```
@@ -102,28 +92,32 @@ To avoid hallucinations with local models, always provide arguments directly:
 
 Without arguments, local models may invent content instead of asking the user.
 
-## Adapting agents to other providers
+## Configuring models
 
-Each agent file in `agents/` has a `model:` field. Replace with any model supported by your opencode provider:
+Agents do not ship with a hardcoded model — they use the default model configured in your `opencode.json`. To assign a specific model per agent, add a `model:` field in the agent's frontmatter:
 
 ```yaml
+---
+description: ...
+mode: subagent
 model: anthropic/claude-sonnet-4-5   # Anthropic
-model: openai/gpt-4o                  # OpenAI
-model: google/gemini-2.5-flash        # Google
-model: ollama/qwen3-coder:30b         # Ollama (default)
+# model: openai/gpt-4o               # OpenAI
+# model: google/gemini-2.5-flash     # Google
+# model: ollama/qwen3-coder:30b      # Ollama
+---
 ```
 
-> **Important:** `deepseek-r1` does not support tool calling and will fail in workflows.
+This keeps the plugin model-agnostic by default while allowing per-agent overrides.
 
 ## Project structure
 
 ```
 agents/
-  analyst.md          # Code analysis agent
-  architect.md        # Architecture design agent
+  analyst.md          # Code analysis agent (read-only)
+  architect.md        # Architecture design agent (read-only)
   frontend.md         # Frontend implementation agent
-  pm.md               # Product manager agent
-  reviewer.md         # Code review agent
+  pm.md               # Product manager agent (read-only)
+  reviewer.md         # Code review agent (read-only)
   python.md           # Python implementation agent
   php-laravel.md      # PHP/Laravel implementation agent
 
@@ -140,7 +134,7 @@ plugins/
   utils/
     types.ts          # Shared contracts: WorkflowCtx, WorkflowRunCtx
     session.ts        # Session resolution, withSession(), runAgentSession()
-    files.ts          # writeDoc(), timestamp(), formatDoc()
+    files.ts          # writeDoc(), readDoc(), timestamp(), formatDoc()
   workflows/
     epic.ts           # Epic workflows (overview + create)
     feature.ts        # Feature workflow
@@ -151,17 +145,18 @@ plugins/
 ### Architecture
 
 Each workflow file owns its full slice:
-- **`meta`** — name, chain description, generated files (used by `workflow_init`)
-- **`createXTool(ctx)`** — tool factory, colocated with its description and args schema
+- **`meta`** — name, chain description, generated files (drives `workflow_init` output automatically)
+- **`createXTool(ctx)`** — tool factory, description and args schema colocated with the implementation
 - **`runXWorkflow(runCtx)`** — private implementation, typed via `WorkflowRunCtx`
 
-`index.ts` is a pure aggregator — adding a workflow means adding one file and one line in `index.ts`.
+`index.ts` is a pure aggregator — adding a workflow = one new file + one line in `index.ts`.
 
 Key utilities:
 - **`WorkflowCtx`** — `{ client, directory }` provided by OpenCode to each tool
-- **`WorkflowRunCtx`** — `WorkflowCtx & { sessionId }` — resolved context passed to workflow functions
+- **`WorkflowRunCtx`** — `WorkflowCtx & { sessionId }` — resolved context passed to internal functions
 - **`withSession(ctx, fn)`** — resolves the sessionId then calls `fn(runCtx)`, eliminating boilerplate across all tools
-- **`runAgentSession(runCtx, agent, prompt)`** — creates a child session, sends the prompt, waits for idle, returns the last assistant text
+- **`runAgentSession(runCtx, agent, prompt)`** — creates a child session, disables workflow tools to prevent recursion, waits for idle, returns the last assistant text
+- **`readDoc(dir, path)`** — reads an existing doc or returns `""` — used for upsert patterns in living docs
 
 ## License
 
