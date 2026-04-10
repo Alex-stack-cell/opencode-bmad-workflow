@@ -18,7 +18,9 @@ All generated docs are saved in `.workflow/` at your project root.
 
 Two modes are available:
 - **Plugin tools** (`workflow_*`) — fully automated, no interruptions
-- **Slash commands** (`/workflow-*`) — interactive, with checkpoints for validation at each step
+- **Slash commands** (`/workflow-*`) — semi-interactive, agents may ask for clarification depending on the model used
+
+> **Note on local models:** Checkpoints and interactive dialogs work best with capable cloud models (Claude, Gemini). Local models like `qwen3-coder:30b` tend to skip checkpoints and generate directly. Always pass arguments explicitly to avoid hallucinations (see Usage below).
 
 ## Requirements
 
@@ -88,18 +90,18 @@ workflow_sprint         → plan a sprint
 workflow_review         → review your code before merging
 ```
 
-### Interactive mode (slash commands)
+### Slash commands — always pass arguments explicitly
 
-The slash command versions pause at each step for your review:
+To avoid hallucinations with local models, always provide arguments directly:
 
 ```
-/workflow-init
-/workflow-epics
-/workflow-epic User Authentication
-/workflow-feature Login page (part of epic: User Authentication)
-/workflow-sprint Implement authentication — week 1
-/workflow-review src/auth
+/workflow-epic WCAG Compliance - Ensure tabs and multi form steps are WCAG compliant
+/workflow-feature Tab accessibility - Fix keyboard navigation and ARIA attributes (part of epic: WCAG Compliance)
+/workflow-sprint WCAG compliance - Fix tabs and multi form steps accessibility, 2 weeks
+/workflow-review src/components/tabs
 ```
+
+Without arguments, local models may invent content instead of asking the user.
 
 ## Adapting agents to other providers
 
@@ -109,8 +111,11 @@ Each agent file in `agents/` has a `model:` field. Replace with any model suppor
 # agents/pm.md
 model: anthropic/claude-sonnet-4-5   # Anthropic
 model: openai/gpt-4o                  # OpenAI
-model: ollama/deepseek-r1:32b         # Ollama (default)
+model: google/gemini-2.5-flash        # Google (free tier available)
+model: ollama/qwen3-coder:30b         # Ollama (default)
 ```
+
+> **Important:** `deepseek-r1` does not support tool calling and will fail in workflows.
 
 ## Project structure
 
