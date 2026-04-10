@@ -3,6 +3,11 @@ description: Create or manage an epic - PM defines scope and breaks it into feat
 agent: pm
 ---
 
+**IMPORTANT: If $ARGUMENTS is empty, you MUST stop immediately and ask the user:**
+- "What is the name of the epic?"
+- "What is the goal of the epic?"
+Do NOT proceed or invent an epic until the user provides both.
+
 Run the epic definition workflow for: $ARGUMENTS
 
 ## Step 1 - PM: Define the epic

@@ -67,7 +67,7 @@ async function waitForIdle(
     const statuses: Array<{ id: string; status: string }> = Array.isArray(raw) ? raw : []
     const entry = statuses.find((s) => s.id === sessionId)
     if (!entry || entry.status === "idle") return
-    await sleep(1500)
+    await sleep(500)
   }
   throw new Error(`Session ${sessionId} timed out waiting for idle`)
 }
