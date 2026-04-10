@@ -58,7 +58,7 @@ async function waitForIdle(
   client: OpencodeClient,
   sessionId: string,
   directory: string,
-  timeoutMs = 5 * 60 * 1000,
+  timeoutMs = 2 * 60 * 1000,
 ): Promise<void> {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
