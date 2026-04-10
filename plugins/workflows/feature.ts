@@ -1,25 +1,50 @@
+import { tool } from "@opencode-ai/plugin"
 import type { OpencodeClient } from "@opencode-ai/sdk"
-import { runAgentSession } from "../utils/session.ts"
+import { runAgentSession, getCurrentSessionId } from "../utils/session.ts"
 import { writeDoc, timestamp, formatDoc } from "../utils/files.ts"
+import type { WorkflowCtx } from "../utils/types.ts"
 
-export interface FeatureWorkflowOptions {
+export const meta = {
+  name: "workflow_feature",
+  summary: "New feature",
+  chain: "PM (PRD) → Architect (architecture) → PM (tasks)",
+  generates: ".workflow/[feature]/PRD.md, ARCHITECTURE.md, TASKS.md",
+}
+
+export function createFeatureTool(ctx: WorkflowCtx) {
+  const { client, directory } = ctx
+  return tool({
+    description:
+      "Automated feature workflow: PM writes PRD → Architect designs architecture → PM breaks down tasks. Docs saved in .workflow/. IMPORTANT: Never call this tool without explicit feature_name and feature_description provided by the user. If either is missing, ask the user before calling.",
+    args: {
+      feature_name: tool.schema
+        .string()
+        .describe("Short feature name explicitly provided by the user. Never invent this."),
+      feature_description: tool.schema
+        .string()
+        .describe("Detailed description explicitly provided by the user. Never invent this."),
+    },
+    async execute(args) {
+      const sessionId = await getCurrentSessionId(client, directory)
+      return runFeatureWorkflow({ client, sessionId, directory, featureName: args.feature_name, featureDescription: args.feature_description })
+    },
+  })
+}
+
+async function runFeatureWorkflow(opts: {
   client: OpencodeClient
   sessionId: string
   directory: string
   featureName: string
   featureDescription: string
-}
-
-export async function runFeatureWorkflow(opts: FeatureWorkflowOptions): Promise<string> {
+}): Promise<string> {
   const { client, sessionId, directory, featureName, featureDescription } = opts
-  const ts = timestamp()
-  const docsDir = `.workflow/${ts}-${featureName.toLowerCase().replace(/\s+/g, "-")}`
+  const docsDir = `.workflow/${timestamp()}-${featureName.toLowerCase().replace(/\s+/g, "-")}`
   const lines: string[] = []
 
   lines.push(`# Workflow: ${featureName}`)
   lines.push(`> Started at ${new Date().toISOString()}\n`)
 
-  // ─── Step 1: PM → PRD ──────────────────────────────────────────────────────
   lines.push("## Step 1/3 — PM: Writing PRD...")
   const pmPrompt = `
 Write a complete PRD for the following feature using BMAD methodology.
@@ -39,7 +64,6 @@ Include:
   const prdPath = await writeDoc(directory, `${docsDir}/PRD.md`, formatDoc("PRD", featureName, prd))
   lines.push(`   ✓ PRD written → ${prdPath}`)
 
-  // ─── Step 2: Architect → Architecture ──────────────────────────────────────
   lines.push("## Step 2/3 — Architect: Designing architecture...")
   const archPrompt = `
 Based on this PRD, design the technical architecture.
@@ -58,7 +82,6 @@ Produce:
   const archPath = await writeDoc(directory, `${docsDir}/ARCHITECTURE.md`, formatDoc("Architecture", featureName, arch))
   lines.push(`   ✓ Architecture written → ${archPath}`)
 
-  // ─── Step 3: PM → Task list ─────────────────────────────────────────────────
   lines.push("## Step 3/3 — PM: Breaking down tasks...")
   const tasksPrompt = `
 Based on this PRD and architecture, create a detailed task breakdown.
@@ -81,7 +104,6 @@ Format as a numbered task list with:
   const tasksPath = await writeDoc(directory, `${docsDir}/TASKS.md`, formatDoc("Task Breakdown", featureName, tasks))
   lines.push(`   ✓ Tasks written → ${tasksPath}`)
 
-  // ─── Summary ────────────────────────────────────────────────────────────────
   lines.push(`\n## Done ✓`)
   lines.push(`Generated docs in \`${docsDir}/\`:`)
   lines.push(`  - PRD.md`)
@@ -91,4 +113,3 @@ Format as a numbered task list with:
 
   return lines.join("\n")
 }
-

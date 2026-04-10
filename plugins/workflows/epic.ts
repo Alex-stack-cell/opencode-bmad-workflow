@@ -1,24 +1,115 @@
+import { tool } from "@opencode-ai/plugin"
 import type { OpencodeClient } from "@opencode-ai/sdk"
-import { runAgentSession } from "../utils/session.ts"
+import { runAgentSession, getCurrentSessionId } from "../utils/session.ts"
 import { writeDoc, formatDoc } from "../utils/files.ts"
 import { readdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
+import type { WorkflowCtx } from "../utils/types.ts"
 
-export interface EpicWorkflowOptions {
+export const meta = {
+  name: "workflow_epic",
+  summary: "New epic",
+  chain: "PM (scope) → PM (features)",
+  generates: ".workflow/epics/[epic].md, [epic]-features.md",
+}
+
+export const metaOverview = {
+  name: "workflow_epics",
+  summary: "Roadmap overview",
+  chain: "Lists all existing epics with priority and inferred status",
+  generates: "(read-only)",
+}
+
+export function createEpicsTool(ctx: WorkflowCtx) {
+  const { client, directory } = ctx
+  return tool({
+    description:
+      "Show a roadmap overview: list all existing epics from .workflow/epics/ with their priority, effort, and inferred status.",
+    args: {},
+    async execute() {
+      const sessionId = await getCurrentSessionId(client, directory)
+      return runEpicsOverview({ client, sessionId, directory })
+    },
+  })
+}
+
+export function createEpicTool(ctx: WorkflowCtx) {
+  const { client, directory } = ctx
+  return tool({
+    description:
+      "Automated epic workflow: PM defines scope and goals → PM suggests features to implement. Docs saved in .workflow/epics/. IMPORTANT: Never call this tool without explicit epic_name and epic_goal provided by the user. If either is missing, ask the user before calling.",
+    args: {
+      epic_name: tool.schema
+        .string()
+        .describe("Short epic name explicitly provided by the user (e.g. 'User Authentication'). Never invent this."),
+      epic_goal: tool.schema
+        .string()
+        .describe("Business goal explicitly provided by the user. Never invent this."),
+    },
+    async execute(args) {
+      const sessionId = await getCurrentSessionId(client, directory)
+      return runEpicWorkflow({ client, sessionId, directory, epicName: args.epic_name, epicGoal: args.epic_goal })
+    },
+  })
+}
+
+async function runEpicsOverview(opts: { client: OpencodeClient; sessionId: string; directory: string }): Promise<string> {
+  const { client, sessionId, directory } = opts
+  const epicsDir = join(directory, ".workflow/epics")
+  const lines: string[] = []
+
+  lines.push("# Epic Roadmap Overview")
+  lines.push(`> Generated at ${new Date().toISOString()}\n`)
+
+  let epicFiles: string[] = []
+  try {
+    const entries = await readdir(epicsDir)
+    epicFiles = entries.filter((f) => f.endsWith(".md") && !f.includes("-features"))
+  } catch {
+    lines.push("No epics found yet in `.workflow/epics/`.\n")
+    lines.push("Use `workflow_epic` to create your first epic.")
+    return lines.join("\n")
+  }
+
+  if (epicFiles.length === 0) {
+    lines.push("No epics found yet in `.workflow/epics/`.\n")
+    lines.push("Use `workflow_epic` to create your first epic.")
+    return lines.join("\n")
+  }
+
+  const epicContents: string[] = []
+  for (const file of epicFiles) {
+    const content = await readFile(join(epicsDir, file), "utf-8")
+    epicContents.push(`### ${file}\n\n${content}`)
+  }
+
+  const analystPrompt = `
+Produce a concise roadmap overview from these epic definitions.
+
+${epicContents.join("\n\n---\n\n")}
+
+For each epic:
+- Name and one-line description
+- Priority
+- Rough effort
+- Features listed
+- Inferred status: TODO / IN PROGRESS / DONE (based on content clues)
+
+Format as a prioritized table or list. End with a recommendation for which epic to tackle next.
+`.trim()
+
+  const overview = await runAgentSession(client, sessionId, directory, "analyst", analystPrompt)
+  lines.push(overview)
+  return lines.join("\n")
+}
+
+async function runEpicWorkflow(opts: {
   client: OpencodeClient
   sessionId: string
   directory: string
   epicName: string
   epicGoal: string
-}
-
-export interface EpicsOverviewOptions {
-  client: OpencodeClient
-  sessionId: string
-  directory: string
-}
-
-export async function runEpicWorkflow(opts: EpicWorkflowOptions): Promise<string> {
+}): Promise<string> {
   const { client, sessionId, directory, epicName, epicGoal } = opts
   const slug = epicName.toLowerCase().replace(/\s+/g, "-")
   const epicsDir = `.workflow/epics`
@@ -27,7 +118,6 @@ export async function runEpicWorkflow(opts: EpicWorkflowOptions): Promise<string
   lines.push(`# Workflow: Epic — ${epicName}`)
   lines.push(`> Started at ${new Date().toISOString()}\n`)
 
-  // ─── Step 1: PM → Epic definition ──────────────────────────────────────────
   lines.push("## Step 1/2 — PM: Defining epic scope...")
   const epicPrompt = `
 Define a high-level epic using BMAD methodology.
@@ -46,14 +136,9 @@ Include:
 `.trim()
 
   const epicDef = await runAgentSession(client, sessionId, directory, "pm", epicPrompt)
-  const epicPath = await writeDoc(
-    directory,
-    `${epicsDir}/${slug}.md`,
-    formatDoc("Epic", epicName, epicDef),
-  )
+  const epicPath = await writeDoc(directory, `${epicsDir}/${slug}.md`, formatDoc("Epic", epicName, epicDef))
   lines.push(`   ✓ Epic written → ${epicPath}`)
 
-  // ─── Step 2: PM → Feature suggestions ──────────────────────────────────────
   lines.push("## Step 2/2 — PM: Suggesting features...")
   const featuresPrompt = `
 Based on this epic, suggest the concrete features to implement.
@@ -71,11 +156,7 @@ Format as a prioritized list ready to be used with workflow_feature.
 `.trim()
 
   const features = await runAgentSession(client, sessionId, directory, "pm", featuresPrompt)
-  const featuresPath = await writeDoc(
-    directory,
-    `${epicsDir}/${slug}-features.md`,
-    formatDoc("Feature Suggestions", epicName, features),
-  )
+  const featuresPath = await writeDoc(directory, `${epicsDir}/${slug}-features.md`, formatDoc("Feature Suggestions", epicName, features))
   lines.push(`   ✓ Features written → ${featuresPath}`)
 
   lines.push(`\n## Done ✓`)
@@ -86,58 +167,3 @@ Format as a prioritized list ready to be used with workflow_feature.
 
   return lines.join("\n")
 }
-
-export async function runEpicsOverview(opts: EpicsOverviewOptions): Promise<string> {
-  const { client, sessionId, directory } = opts
-  const epicsDir = join(directory, ".workflow/epics")
-  const lines: string[] = []
-
-  lines.push("# Epic Roadmap Overview")
-  lines.push(`> Generated at ${new Date().toISOString()}\n`)
-
-  // Read existing epic files
-  let epicFiles: string[] = []
-  try {
-    const entries = await readdir(epicsDir)
-    epicFiles = entries.filter((f) => f.endsWith(".md") && !f.includes("-features"))
-  } catch {
-    lines.push("No epics found yet in `.workflow/epics/`.\n")
-    lines.push("Use `workflow_epic` to create your first epic.")
-    return lines.join("\n")
-  }
-
-  if (epicFiles.length === 0) {
-    lines.push("No epics found yet in `.workflow/epics/`.\n")
-    lines.push("Use `workflow_epic` to create your first epic.")
-    return lines.join("\n")
-  }
-
-  // Collect epic contents for the analyst
-  const epicContents: string[] = []
-  for (const file of epicFiles) {
-    const content = await readFile(join(epicsDir, file), "utf-8")
-    epicContents.push(`### ${file}\n\n${content}`)
-  }
-
-  // Ask analyst to produce a roadmap summary
-  const analystPrompt = `
-Produce a concise roadmap overview from these epic definitions.
-
-${epicContents.join("\n\n---\n\n")}
-
-For each epic:
-- Name and one-line description
-- Priority
-- Rough effort
-- Features listed
-- Inferred status: TODO / IN PROGRESS / DONE (based on content clues)
-
-Format as a prioritized table or list. End with a recommendation for which epic to tackle next.
-`.trim()
-
-  const overview = await runAgentSession(client, sessionId, directory, "analyst", analystPrompt)
-  lines.push(overview)
-
-  return lines.join("\n")
-}
-
