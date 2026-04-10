@@ -35,6 +35,9 @@ export async function withSession<T>(
  * @param prompt - prompt text to send
  * @returns last assistant text message, or "" if none
  */
+const DIRECT_OUTPUT_INSTRUCTION =
+  "IMPORTANT: Respond with plain text only. Do NOT use any tools or function calls. Write the content directly.\n\n"
+
 export async function runAgentSession(
   runCtx: WorkflowRunCtx,
   agentName: string,
@@ -53,7 +56,7 @@ export async function runAgentSession(
 
   await client.session.prompt({
     path: { id: sessionId },
-    body: { agent: agentName, parts: [{ type: "text", text: prompt }] },
+    body: { agent: agentName, parts: [{ type: "text", text: DIRECT_OUTPUT_INSTRUCTION + prompt }] },
     query: { directory },
   })
 
