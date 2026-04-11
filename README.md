@@ -67,16 +67,11 @@ This means you always review and can modify AI output before anything is committ
 
 > **Note:** This plugin is installed by copying files — there is no npm package yet.
 
-### 1. Clone the repo
+### 1. Clone the repo and run the installer
 
 ```bash
 git clone https://github.com/Alex-stack-cell/opencode-bmad-workflow.git
 cd opencode-bmad-workflow
-```
-
-### 2. Run the installer
-
-```bash
 ./install.sh
 ```
 
@@ -86,13 +81,15 @@ The script:
 - Patches `opencode.json` to register the plugin
 - Warns about any missing agent files
 
+> **Already have an opencode config directory?** The installer copies files into `~/.config/opencode/` by default. Your existing config is preserved — only the plugin files are added.
+
 To install into a custom opencode config directory:
 
 ```bash
 OPENCODE_CONFIG_DIR=/path/to/your/opencode/config ./install.sh
 ```
 
-### 3. Restart opencode
+### 2. Restart opencode
 
 ---
 

@@ -38,24 +38,42 @@ else
   fail "Neither bun nor node found. Install Bun (https://bun.sh) or Node.js first."
 fi
 
-# ─── If installing into an external target directory, copy files ───────────────
+# ─── Copy files to target directory ───────────────────────────────────────────
 
 if [ "$REPO_DIR" != "$TARGET_DIR" ]; then
   echo "Copying files to $TARGET_DIR..."
   mkdir -p "$TARGET_DIR"
 
-  for dir in agents commands plugins; do
+  # commands/ and plugins/ are owned by this plugin — always overwrite
+  for dir in commands plugins; do
     if [ -d "$REPO_DIR/$dir" ]; then
       cp -r "$REPO_DIR/$dir" "$TARGET_DIR/"
       ok "Copied $dir/"
     fi
   done
 
-  for file in package.json; do
-    if [ -f "$REPO_DIR/$file" ]; then
-      cp "$REPO_DIR/$file" "$TARGET_DIR/$file"
-    fi
-  done
+  # agents/ — copy only files that don't already exist (never overwrite user agents)
+  if [ -d "$REPO_DIR/agents" ]; then
+    mkdir -p "$TARGET_DIR/agents"
+    copied=0
+    skipped=0
+    for src in "$REPO_DIR/agents/"*.md; do
+      filename="$(basename "$src")"
+      dest="$TARGET_DIR/agents/$filename"
+      if [ -f "$dest" ]; then
+        skipped=$((skipped + 1))
+      else
+        cp "$src" "$dest"
+        copied=$((copied + 1))
+      fi
+    done
+    ok "Agents: $copied added, $skipped already existed (not overwritten)"
+  fi
+
+  # package.json — copy only if target doesn't have one
+  if [ -f "$REPO_DIR/package.json" ] && [ ! -f "$TARGET_DIR/package.json" ]; then
+    cp "$REPO_DIR/package.json" "$TARGET_DIR/package.json"
+  fi
 else
   ok "Already in config directory — skipping file copy"
 fi
