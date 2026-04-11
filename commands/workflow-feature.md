@@ -1,34 +1,31 @@
 ---
 description: Create a feature interactively - preview before writing. Saves PRD, architecture, tasks in ai-artifacts/ and updates docs/
-agent: pm
 ---
 
-**IMPORTANT: If $ARGUMENTS is empty, you MUST stop immediately and ask the user:**
-- "What is the name of the feature?"
-- "What is the description of the feature?"
-Do NOT proceed until the user provides both.
+If $ARGUMENTS is empty, ask the user:
+- "Quel est le nom de la feature ?"
+- "Quelle est la description de la feature ?"
+
+Do NOT proceed until the user provides both. Do NOT call any tool yet.
+
+---
 
 ## Step 1 — Preview
 
-Call `workflow_feature_preview` with the name and description from: $ARGUMENTS
+Call `workflow_feature_preview` with the name and description provided by the user.
 
-Tell the user the preview files are ready and where to find them (ai-artifacts/.previews/feature-[slug]/).
-Ask them to open and review the files, and edit anything they want to change.
+Once the tool returns, tell the user:
+- The preview files are at `ai-artifacts/.previews/feature-[slug]/`
+- They can open, read, and edit the files freely (prd.md, architecture.md, tasks.md, global-architecture.md, feature-doc.md)
 
----
+Then STOP and ask: "As-tu revu les fichiers ? Veux-tu modifier quelque chose avant de sauvegarder ?"
 
-**CHECKPOINT — Stop here.**
-
-Ask:
-1. Have you reviewed the preview files?
-2. Anything to edit before saving?
-
-Wait for explicit confirmation before proceeding.
+Do NOT call `workflow_feature_save` until the user explicitly confirms they are ready.
 
 ---
 
 ## Step 2 — Save
 
-Call `workflow_feature_save` with the same arguments.
+Only after explicit user confirmation: call `workflow_feature_save` with the same arguments.
 
 Confirm which files were written and suggest which agent to use to start implementation.
