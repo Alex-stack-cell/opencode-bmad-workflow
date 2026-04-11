@@ -21,19 +21,36 @@ const allMeta = [metaStatus, epicMeta, storyMeta, storyUpdateMeta, storyDevMeta,
 const SUPPORTED_LANGUAGES = ["en", "fr", "es", "de", "pt", "it", "ja", "zh"] as const
 
 function buildInitText(config: WorkflowConfig): string {
-  const metaLines = allMeta.flatMap((m) => [
-    `## ${m.name} — ${m.summary}`,
-    `   Chain: ${m.chain}`,
-    `   Generates: ${m.generates}\n`,
-  ])
-
   return [
-    "# Available workflows\n",
-    ...metaLines,
+    "# BMAD Workflow — Quick Reference",
+    "",
+    "## Recommended cycle",
+    "",
+    "```",
+    "1. /workflow-setup         → set language (fr, en, es…)                    [once per project]",
+    "2. /workflow-epic          → define an epic (scope, goal, priority)         [once per epic]",
+    "3. /workflow-story         → create a BMAD story for that epic              [repeat per story]",
+    "4. /workflow-status        → verify stories appear as ready-for-dev",
+    "5. /workflow-sprint        → plan a sprint from your backlog                [once per sprint]",
+    "6. /workflow-story-dev     → dev agent implements the story                 [repeat per story]",
+    "7. /workflow-story-update  → mark as review, then done                      [repeat per story]",
+    "8. /workflow-review        → adversarial code review before closing          [optional]",
+    "```",
+    "",
+    "## Story lifecycle",
+    "",
+    "```",
+    "ready-for-dev → in-progress → review → done",
+    "                                     ↘ superseded / deferred",
+    "```",
+    "",
+    "## All tools",
+    "",
+    ...allMeta.map((m) => `- \`${m.name}\` — ${m.summary}`),
+    "",
     "---",
-    "All docs are saved in `ai-artifacts/` at the project root.",
-    `\nCurrent language: \`${config.language}\` — use \`workflow_setup\` to change it.`,
-    "\nEach workflow has two steps: call `_preview` first, review/edit the files, then call `_save`.",
+    `Language: \`${config.language}\` — use \`workflow_setup\` to change.`,
+    "Artifacts: `ai-artifacts/` — preview files in `ai-artifacts/.previews/` before every save.",
   ].join("\n")
 }
 
