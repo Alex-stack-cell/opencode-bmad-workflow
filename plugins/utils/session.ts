@@ -45,6 +45,8 @@ const WORKFLOW_TOOLS_DISABLED: Record<string, boolean> = {
   workflow_epic_save: false,
   workflow_story_preview: false,
   workflow_story_save: false,
+  workflow_story_update: false,
+  workflow_story_dev: false,
   workflow_sprint_preview: false,
   workflow_sprint_save: false,
   workflow_review_preview: false,
@@ -59,6 +61,58 @@ function buildLanguageInstruction(language: string): string {
   if (language === "en") return ""
   const label = getLanguageLabel(language)
   return `IMPORTANT: Write your entire response in ${label} (${language}). All headings, descriptions, labels, and content must be in ${label}.\n\n`
+}
+
+/**
+ * Like runAgentSession but the child agent has full tool access (can read/write files).
+ * Used for dev workflows where the agent must implement code.
+ */
+export async function runDevAgentSession(
+  runCtx: WorkflowRunCtx,
+  agentName: string,
+  prompt: string,
+): Promise<string> {
+  const { client, directory, sessionId: parentSessionId, config } = runCtx
+
+  const sessionRes = await client.session.create({
+    body: { parentID: parentSessionId, title: `[workflow] ${agentName}` },
+    query: { directory },
+  })
+  const session = sessionRes.data
+  if (!session) throw new Error(`Failed to create session for agent "${agentName}"`)
+
+  const sessionId = session.id
+  const languageInstruction = buildLanguageInstruction(config.language)
+
+  await client.session.prompt({
+    path: { id: sessionId },
+    body: {
+      agent: agentName,
+      tools: WORKFLOW_TOOLS_DISABLED,
+      parts: [{ type: "text", text: languageInstruction + prompt }],
+    },
+    query: { directory },
+  })
+
+  await waitForIdle(client, sessionId, directory)
+
+  const messagesRes = await client.session.messages({
+    path: { id: sessionId },
+    query: { directory },
+  })
+
+  const messages = messagesRes.data ?? []
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    const info = msg.info as { role?: string }
+    if (info?.role !== "assistant") continue
+    const textPart = msg.parts.find((p: { type: string }) => p.type === "text") as
+      | { type: "text"; text: string }
+      | undefined
+    if (textPart?.text) return textPart.text
+  }
+
+  return ""
 }
 
 export async function runAgentSession(

@@ -109,11 +109,20 @@ function buildStoryFile(storyId: string, title: string, userStory: string, tasks
     `# Story ${storyId}: ${title}`,
     ``,
     `## Status`,
-    `backlog`,
+    `ready-for-dev`,
     ``,
     userStory,
     ``,
     tasks,
+    ``,
+    `## Dev Agent Record`,
+    ``,
+    `### Agent Model Used`,
+    ``,
+    `### Completion Notes`,
+    ``,
+    `### Files Modified`,
+    ``,
   ].join("\n")
 }
 
@@ -157,7 +166,7 @@ ${existingStatus
 
 New story to add:
 - title: "${storyTitle}"
-- status: backlog
+- status: ready-for-dev
 - parent epic id: ${epicId}
 
 Respond with ONLY this JSON (no markdown, no explanation):
@@ -172,7 +181,7 @@ epics:
     stories:
       - id: "1.1"
         title: "Story title"
-        status: backlog
+        status: ready-for-dev
 `.trim())
 
   // Parse JSON envelope — fall back gracefully if LLM ignored the format

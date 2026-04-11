@@ -2,6 +2,8 @@ import { tool } from "@opencode-ai/plugin"
 import type { OpencodeClient } from "@opencode-ai/sdk"
 import { createStatusTool, createEpicPreviewTool, createEpicSaveTool, meta as epicMeta, metaStatus } from "./workflows/epic.ts"
 import { createStoryPreviewTool, createStorySaveTool, meta as storyMeta } from "./workflows/story.ts"
+import { createStoryUpdateTool, meta as storyUpdateMeta } from "./workflows/story-update.ts"
+import { createStoryDevTool, meta as storyDevMeta } from "./workflows/story-dev.ts"
 import { createSprintPreviewTool, createSprintSaveTool, meta as sprintMeta } from "./workflows/sprint.ts"
 import { createReviewPreviewTool, createReviewSaveTool, meta as reviewMeta } from "./workflows/review.ts"
 import { loadConfig, saveConfig } from "./utils/config.ts"
@@ -14,22 +16,25 @@ type PluginCtx = {
   project: { root: string }
 }
 
-const allMeta = [metaStatus, epicMeta, storyMeta, sprintMeta, reviewMeta]
+const allMeta = [metaStatus, epicMeta, storyMeta, storyUpdateMeta, storyDevMeta, sprintMeta, reviewMeta]
 
 const SUPPORTED_LANGUAGES = ["en", "fr", "es", "de", "pt", "it", "ja", "zh"] as const
 
 function buildInitText(config: WorkflowConfig): string {
-  const lines = ["# Available workflows\n"]
-  for (const m of allMeta) {
-    lines.push(`## ${m.name} — ${m.summary}`)
-    lines.push(`   Chain: ${m.chain}`)
-    lines.push(`   Generates: ${m.generates}\n`)
-  }
-  lines.push("---")
-  lines.push("All docs are saved in `ai-artifacts/` at the project root.")
-  lines.push(`\nCurrent language: \`${config.language}\` — use \`workflow_setup\` to change it.`)
-  lines.push("\nEach workflow has two steps: call `_preview` first, review/edit the files, then call `_save`.")
-  return lines.join("\n")
+  const metaLines = allMeta.flatMap((m) => [
+    `## ${m.name} — ${m.summary}`,
+    `   Chain: ${m.chain}`,
+    `   Generates: ${m.generates}\n`,
+  ])
+
+  return [
+    "# Available workflows\n",
+    ...metaLines,
+    "---",
+    "All docs are saved in `ai-artifacts/` at the project root.",
+    `\nCurrent language: \`${config.language}\` — use \`workflow_setup\` to change it.`,
+    "\nEach workflow has two steps: call `_preview` first, review/edit the files, then call `_save`.",
+  ].join("\n")
 }
 
 async function WorkflowPlugin(ctx: PluginCtx) {
@@ -47,7 +52,7 @@ async function WorkflowPlugin(ctx: PluginCtx) {
         },
       }),
       workflow_setup: tool({
-        description: "Configure workflow preferences for this project. Sets the language used for all generated documents (epics, stories, sprints, reviews).",
+        description: "Configure workflow preferences for this project. Sets the language used for all generated documents.",
         args: {
           language: tool.schema
             .enum(SUPPORTED_LANGUAGES)
@@ -70,6 +75,8 @@ async function WorkflowPlugin(ctx: PluginCtx) {
       workflow_epic_save: createEpicSaveTool(wfCtx),
       workflow_story_preview: createStoryPreviewTool(wfCtx),
       workflow_story_save: createStorySaveTool(wfCtx),
+      workflow_story_update: createStoryUpdateTool(wfCtx),
+      workflow_story_dev: createStoryDevTool(wfCtx),
       workflow_sprint_preview: createSprintPreviewTool(wfCtx),
       workflow_sprint_save: createSprintSaveTool(wfCtx),
       workflow_review_preview: createReviewPreviewTool(wfCtx),
