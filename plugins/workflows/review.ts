@@ -1,6 +1,8 @@
 import { tool } from "@opencode-ai/plugin"
 import { runAgentSession, withSession } from "../utils/session.ts"
-import { writeDoc, timestamp, formatDoc } from "../utils/files.ts"
+import { writeDoc, readDoc, timestamp, formatDoc } from "../utils/files.ts"
+import { rm } from "node:fs/promises"
+import { join } from "node:path"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
 
 // ─── Metadata ─────────────────────────────────────────────────────────────────
@@ -17,7 +19,7 @@ export const meta = {
 export function createReviewTool(ctx: WorkflowCtx) {
   return tool({
     description:
-      "Code review workflow: Analyst investigates → Reviewer writes the report. Pass dry_run: true to preview generated content before writing.",
+      "Code review workflow: Analyst investigates → Reviewer writes the report. Pass dry_run: true to write a preview to ai-artifacts/.previews/ for review before committing.",
     args: {
       scope: tool.schema
         .string()
@@ -26,7 +28,7 @@ export function createReviewTool(ctx: WorkflowCtx) {
       dry_run: tool.schema
         .boolean()
         .optional()
-        .describe("If true, generate and return a preview without writing any files. Default: false."),
+        .describe("If true, write a preview to ai-artifacts/.previews/ without touching real files. The user can edit the preview, then call again with dry_run: false to finalize. Default: false."),
     },
     execute: (args) =>
       withSession(ctx, (runCtx) =>
@@ -45,11 +47,24 @@ type ReviewArgs = WorkflowRunCtx & { scope?: string; dryRun: boolean }
 
 async function runReviewWorkflow({ scope, dryRun, ...runCtx }: ReviewArgs): Promise<string> {
   const { directory } = runCtx
-  const docsDir = `ai-artifacts/review-${timestamp()}`
   const scopeLabel = scope ?? "full diff"
+  const slug = (scope ?? "full-diff").toLowerCase().replaceAll(/[^a-z0-9]/g, "-").replaceAll(/-+/g, "-")
+  const previewDir = `ai-artifacts/.previews/review-${slug}`
 
-  // ── Generate all content ──────────────────────────────────────────────────────
-  const analysis = await runAgentSession(runCtx, "analyst", `
+  // ── Check for existing preview (user may have edited it) ──────────────────────
+  const previewAnalysis = await readDoc(directory, `${previewDir}/analysis.md`)
+  const previewReview = await readDoc(directory, `${previewDir}/review.md`)
+  const hasPreview = !!previewAnalysis && !!previewReview
+
+  // ── Generate or reuse content ─────────────────────────────────────────────────
+  let analysis: string
+  let review: string
+
+  if (!dryRun && hasPreview) {
+    analysis = previewAnalysis
+    review = previewReview
+  } else {
+    analysis = await runAgentSession(runCtx, "analyst", `
 Perform a deep technical analysis of the following code scope.
 ${scope ? `Scope: ${scope}` : "Scope: the current git diff / recent changes"}
 
@@ -64,7 +79,7 @@ Look for:
 Be thorough and methodical. List all findings with file references.
 `.trim())
 
-  const review = await runAgentSession(runCtx, "reviewer", `
+    review = await runAgentSession(runCtx, "reviewer", `
 Based on this technical analysis, write a structured code review report.
 
 Analysis:
@@ -78,32 +93,43 @@ Format the report with:
 - APPROVED / CHANGES REQUESTED verdict
 - Summary of strengths
 `.trim())
-
-  // ── Dry run: return preview without writing ───────────────────────────────────
-  if (dryRun) {
-    const lines: string[] = []
-    lines.push(`# Preview — Code Review: ${scopeLabel}`)
-    lines.push(`> This is a dry run. No files have been written.\n`)
-
-    lines.push(`## → ${docsDir}/ANALYSIS.md\n`)
-    lines.push(analysis)
-    lines.push(`\n---\n\n## → ${docsDir}/REVIEW.md\n`)
-    lines.push(review)
-
-    lines.push(`\n---\n\n> Call again with \`dry_run: false\` to write these files.`)
-    return lines.join("\n")
   }
 
-  // ── Write files ───────────────────────────────────────────────────────────────
+  // ── Dry run: write preview files ──────────────────────────────────────────────
+  if (dryRun) {
+    const docsDir = `ai-artifacts/review-[date]`
+    await writeDoc(directory, `${previewDir}/analysis.md`, analysis)
+    await writeDoc(directory, `${previewDir}/review.md`, review)
+
+    return [
+      `# Preview ready — Code Review: ${scopeLabel}`,
+      ``,
+      `Open and edit these files freely before finalizing:`,
+      `  - ${previewDir}/analysis.md → ${docsDir}/ANALYSIS.md`,
+      `  - ${previewDir}/review.md → ${docsDir}/REVIEW.md`,
+      ``,
+      `When ready, call \`workflow_review\` again with the same arguments and \`dry_run: false\` to save to their final locations.`,
+    ].join("\n")
+  }
+
+  // ── Write real files ──────────────────────────────────────────────────────────
+  const docsDir = `ai-artifacts/review-${timestamp()}`
   const lines: string[] = []
   lines.push(`# Workflow: Code Review`)
   lines.push(`> Started at ${new Date().toISOString()}\n`)
+
+  if (hasPreview) lines.push(`> Loaded from preview (including any edits you made).\n`)
 
   const analysisPath = await writeDoc(directory, `${docsDir}/ANALYSIS.md`, formatDoc("Code Analysis", scopeLabel, analysis))
   lines.push(`   ✓ Analysis written → ${analysisPath}`)
 
   const reviewPath = await writeDoc(directory, `${docsDir}/REVIEW.md`, formatDoc("Code Review Report", scopeLabel, review))
   lines.push(`   ✓ Review written → ${reviewPath}`)
+
+  if (hasPreview) {
+    await rm(join(directory, previewDir), { recursive: true, force: true })
+    lines.push(`   ✓ Preview cleaned up`)
+  }
 
   lines.push(`\n## Done ✓`)
   lines.push(`Generated docs in \`${docsDir}/\`:`)

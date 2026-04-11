@@ -1,7 +1,7 @@
 import { tool } from "@opencode-ai/plugin"
 import { runAgentSession, withSession } from "../utils/session.ts"
 import { writeDoc, readDoc, formatDoc } from "../utils/files.ts"
-import { readdir, readFile } from "node:fs/promises"
+import { readdir, readFile, rm } from "node:fs/promises"
 import { join } from "node:path"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
 
@@ -35,7 +35,7 @@ export function createEpicsTool(ctx: WorkflowCtx) {
 export function createEpicTool(ctx: WorkflowCtx) {
   return tool({
     description:
-      "Epic workflow: PM defines scope and goals. Updates docs/OVERVIEW.md and docs/ROADMAP.md. Pass dry_run: true to preview generated content before writing. IMPORTANT: Never call this tool without explicit epic_name, epic_goal, and priority provided by the user.",
+      "Epic workflow: PM defines scope and goals. Updates docs/OVERVIEW.md and docs/ROADMAP.md. Pass dry_run: true to write a preview to ai-artifacts/.previews/ for review before committing. IMPORTANT: Never call this tool without explicit epic_name, epic_goal, and priority provided by the user.",
     args: {
       epic_name: tool.schema
         .string()
@@ -49,7 +49,7 @@ export function createEpicTool(ctx: WorkflowCtx) {
       dry_run: tool.schema
         .boolean()
         .optional()
-        .describe("If true, generate and return a preview without writing any files. Default: false."),
+        .describe("If true, write a preview to ai-artifacts/.previews/ without touching real files. The user can edit the preview, then call again with dry_run: false to finalize. Default: false."),
     },
     execute: (args) =>
       withSession(ctx, (runCtx) =>
@@ -116,12 +116,30 @@ type EpicArgs = WorkflowRunCtx & { epicName: string; epicGoal: string; priority:
 async function runEpicWorkflow({ epicName, epicGoal, priority, dryRun, ...runCtx }: EpicArgs): Promise<string> {
   const { directory } = runCtx
   const slug = epicName.toLowerCase().replace(/\s+/g, "-")
+  const previewDir = `ai-artifacts/.previews/epic-${slug}`
   const epicsDir = `ai-artifacts/epics`
   const overviewPath = `docs/OVERVIEW.md`
   const roadmapPath = `docs/ROADMAP.md`
 
-  // ── Generate epic definition ──────────────────────────────────────────────────
-  const epicDef = await runAgentSession(runCtx, "pm", `
+  // ── Check for existing preview (user may have edited it) ──────────────────────
+  const previewEpic = await readDoc(directory, `${previewDir}/epic.md`)
+  const previewRoadmap = await readDoc(directory, `${previewDir}/roadmap.md`)
+  const previewOverview = await readDoc(directory, `${previewDir}/overview.md`)
+  const hasPreview = !!previewEpic && !!previewRoadmap
+
+  // ── Generate or reuse content ─────────────────────────────────────────────────
+  let epicDef: string
+  let overviewContent: string | null
+  let updatedRoadmap: string
+  let existingRoadmap = ""
+
+  if (!dryRun && hasPreview) {
+    epicDef = previewEpic
+    overviewContent = previewOverview || null
+    updatedRoadmap = previewRoadmap
+    existingRoadmap = await readDoc(directory, roadmapPath)
+  } else {
+    epicDef = await runAgentSession(runCtx, "pm", `
 Define a high-level epic using BMAD methodology.
 
 Epic name: ${epicName}
@@ -137,11 +155,8 @@ Include:
 - Priority: ${priority} (set by the user — do not change this)
 `.trim())
 
-  // ── Generate OVERVIEW.md content if needed ────────────────────────────────────
-  const existingOverview = await readDoc(directory, overviewPath)
-  let overviewContent: string | null = null
-  if (!existingOverview) {
-    overviewContent = await runAgentSession(runCtx, "pm", `
+    const existingOverview = await readDoc(directory, overviewPath)
+    overviewContent = existingOverview ? null : await runAgentSession(runCtx, "pm", `
 Create a concise project overview document based on the codebase context.
 
 Include:
@@ -153,11 +168,9 @@ Include:
 Do NOT include epics, roadmap, or planning information — that belongs in ROADMAP.md.
 Keep it stable: this document should rarely need to change.
 `.trim())
-  }
 
-  // ── Generate ROADMAP.md ───────────────────────────────────────────────────────
-  const existingRoadmap = await readDoc(directory, roadmapPath)
-  const updatedRoadmap = await runAgentSession(runCtx, "pm", `
+    existingRoadmap = await readDoc(directory, roadmapPath)
+    updatedRoadmap = await runAgentSession(runCtx, "pm", `
 Update the project roadmap to include this new epic.
 
 ${existingRoadmap
@@ -171,32 +184,38 @@ Format:
 - One section per epic with: status (TODO / IN PROGRESS / DONE), priority, one-line description, effort estimate
 - Keep it concise — this is a planning reference, not detailed documentation
 `.trim())
-
-  // ── Dry run: return preview without writing ───────────────────────────────────
-  if (dryRun) {
-    const lines: string[] = []
-    lines.push(`# Preview — Epic: ${epicName}`)
-    lines.push(`> This is a dry run. No files have been written.\n`)
-
-    lines.push(`## → ai-artifacts/epics/${slug}.md\n`)
-    lines.push(epicDef)
-
-    if (overviewContent) {
-      lines.push(`\n---\n\n## → docs/OVERVIEW.md (will be created)\n`)
-      lines.push(overviewContent)
-    }
-
-    lines.push(`\n---\n\n## → docs/ROADMAP.md (will be ${existingRoadmap ? "updated" : "created"})\n`)
-    lines.push(updatedRoadmap)
-
-    lines.push(`\n---\n\n> Call again with \`dry_run: false\` to write these files.`)
-    return lines.join("\n")
   }
 
-  // ── Write files ───────────────────────────────────────────────────────────────
+  // ── Dry run: write preview files ──────────────────────────────────────────────
+  if (dryRun) {
+    await writeDoc(directory, `${previewDir}/epic.md`, epicDef)
+    if (overviewContent) {
+      await writeDoc(directory, `${previewDir}/overview.md`, overviewContent)
+    }
+    await writeDoc(directory, `${previewDir}/roadmap.md`, updatedRoadmap)
+
+    const files = [
+      `  - ${previewDir}/epic.md → ai-artifacts/epics/${slug}.md`,
+      overviewContent ? `  - ${previewDir}/overview.md → docs/OVERVIEW.md (will be created)` : null,
+      `  - ${previewDir}/roadmap.md → docs/ROADMAP.md (will be ${existingRoadmap ? "updated" : "created"})`,
+    ].filter(Boolean)
+
+    return [
+      `# Preview ready — Epic: ${epicName}`,
+      ``,
+      `Open and edit these files freely before finalizing:`,
+      ...files,
+      ``,
+      `When ready, call \`workflow_epic\` again with the same arguments and \`dry_run: false\` to save to their final locations.`,
+    ].join("\n")
+  }
+
+  // ── Write real files ──────────────────────────────────────────────────────────
   const lines: string[] = []
   lines.push(`# Workflow: Epic — ${epicName}`)
   lines.push(`> Started at ${new Date().toISOString()}\n`)
+
+  if (hasPreview) lines.push(`> Loaded from preview (including any edits you made).\n`)
 
   const epicFilePath = await writeDoc(directory, `${epicsDir}/${slug}.md`, formatDoc("Epic", epicName, epicDef))
   lines.push(`   ✓ Epic written → ${epicFilePath}`)
@@ -208,6 +227,11 @@ Format:
 
   const roadmapFilePath = await writeDoc(directory, roadmapPath, updatedRoadmap)
   lines.push(`   ✓ Roadmap updated → ${roadmapFilePath}`)
+
+  if (hasPreview) {
+    await rm(join(directory, previewDir), { recursive: true, force: true })
+    lines.push(`   ✓ Preview cleaned up`)
+  }
 
   lines.push(`\n## Done ✓`)
   lines.push(`Generated:`)

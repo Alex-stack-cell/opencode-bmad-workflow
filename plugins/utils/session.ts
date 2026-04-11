@@ -34,7 +34,7 @@ export async function withSession<T>(
  * Waits until the session is idle, then returns the last assistant text.
  */
 const DIRECT_OUTPUT_INSTRUCTION =
-  "IMPORTANT: Respond with plain text only. Do NOT use any tools or function calls. Write the content directly.\n\n"
+  "IMPORTANT: Respond with plain text only. Do NOT use any tools or function calls. Do NOT ask for confirmation, approval, or additional input from the user. Write the complete content directly and immediately.\n\n"
 
 /** Workflow tool names to disable in child sessions to prevent recursion. */
 const WORKFLOW_TOOLS_DISABLED: Record<string, boolean> = {

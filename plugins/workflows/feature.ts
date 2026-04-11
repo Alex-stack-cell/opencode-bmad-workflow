@@ -1,6 +1,8 @@
 import { tool } from "@opencode-ai/plugin"
 import { runAgentSession, withSession } from "../utils/session.ts"
 import { writeDoc, readDoc, timestamp, formatDoc } from "../utils/files.ts"
+import { rm } from "node:fs/promises"
+import { join } from "node:path"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
 
 // ─── Metadata ─────────────────────────────────────────────────────────────────
@@ -17,7 +19,7 @@ export const meta = {
 export function createFeatureTool(ctx: WorkflowCtx) {
   return tool({
     description:
-      "Feature workflow: PM writes PRD → Architect designs architecture → PM breaks down tasks. Updates docs/. Pass dry_run: true to preview generated content before writing. IMPORTANT: Never call this tool without explicit feature_name and feature_description provided by the user.",
+      "Feature workflow: PM writes PRD → Architect designs architecture → PM breaks down tasks. Updates docs/. Pass dry_run: true to write a preview to ai-artifacts/.previews/ for review before committing. IMPORTANT: Never call this tool without explicit feature_name and feature_description provided by the user.",
     args: {
       feature_name: tool.schema
         .string()
@@ -28,7 +30,7 @@ export function createFeatureTool(ctx: WorkflowCtx) {
       dry_run: tool.schema
         .boolean()
         .optional()
-        .describe("If true, generate and return a preview without writing any files. Default: false."),
+        .describe("If true, write a preview to ai-artifacts/.previews/ without touching real files. The user can edit the preview, then call again with dry_run: false to finalize. Default: false."),
     },
     execute: (args) =>
       withSession(ctx, (runCtx) =>
@@ -49,10 +51,34 @@ type FeatureArgs = WorkflowRunCtx & { featureName: string; featureDescription: s
 async function runFeatureWorkflow({ featureName, featureDescription, dryRun, ...runCtx }: FeatureArgs): Promise<string> {
   const { directory } = runCtx
   const slug = featureName.toLowerCase().replace(/\s+/g, "-")
-  const docsDir = `ai-artifacts/${timestamp()}-${slug}`
+  const previewDir = `ai-artifacts/.previews/feature-${slug}`
+  const artifactsDir = `ai-artifacts/${timestamp()}-${slug}`
 
-  // ── Generate all content ──────────────────────────────────────────────────────
-  const prd = await runAgentSession(runCtx, "pm", `
+  // ── Check for existing preview (user may have edited it) ──────────────────────
+  const previewPrd = await readDoc(directory, `${previewDir}/prd.md`)
+  const previewArch = await readDoc(directory, `${previewDir}/architecture.md`)
+  const previewTasks = await readDoc(directory, `${previewDir}/tasks.md`)
+  const previewGlobalArch = await readDoc(directory, `${previewDir}/global-architecture.md`)
+  const previewFeatureDoc = await readDoc(directory, `${previewDir}/feature-doc.md`)
+  const hasPreview = !!previewPrd && !!previewArch && !!previewTasks
+
+  // ── Generate or reuse content ─────────────────────────────────────────────────
+  let prd: string
+  let arch: string
+  let tasks: string
+  let updatedArch: string
+  let featureDoc: string
+  let existingArch: string
+
+  if (!dryRun && hasPreview) {
+    prd = previewPrd
+    arch = previewArch
+    tasks = previewTasks
+    existingArch = await readDoc(directory, "docs/ARCHITECTURE.md")
+    updatedArch = previewGlobalArch || existingArch
+    featureDoc = previewFeatureDoc || ""
+  } else {
+    prd = await runAgentSession(runCtx, "pm", `
 Write a complete PRD for the following feature using BMAD methodology.
 
 Feature: ${featureName}
@@ -66,7 +92,7 @@ Include:
 - Technical notes
 `.trim())
 
-  const arch = await runAgentSession(runCtx, "architect", `
+    arch = await runAgentSession(runCtx, "architect", `
 Based on this PRD, design the technical architecture.
 
 ${prd}
@@ -79,7 +105,7 @@ Produce:
 - Risks & mitigations
 `.trim())
 
-  const tasks = await runAgentSession(runCtx, "pm", `
+    tasks = await runAgentSession(runCtx, "pm", `
 Based on this PRD and architecture, create a detailed task breakdown.
 
 PRD:
@@ -96,8 +122,8 @@ Format as a numbered task list with:
 - Best suited agent (frontend / architect / reviewer / analyst)
 `.trim())
 
-  const existingArch = await readDoc(directory, "docs/ARCHITECTURE.md")
-  const updatedArch = await runAgentSession(runCtx, "architect", `
+    existingArch = await readDoc(directory, "docs/ARCHITECTURE.md")
+    updatedArch = await runAgentSession(runCtx, "architect", `
 Update the global architecture document to include decisions made for this feature.
 
 ${existingArch
@@ -113,7 +139,7 @@ The document should:
 - Be useful for a new developer understanding the codebase
 `.trim())
 
-  const featureDoc = await runAgentSession(runCtx, "pm", `
+    featureDoc = await runAgentSession(runCtx, "pm", `
 Write a concise feature documentation page for a developer reference guide.
 
 Feature: ${featureName}
@@ -129,40 +155,44 @@ Include:
 - Technical summary (how it works, key components)
 - Acceptance criteria (condensed)
 `.trim())
-
-  // ── Dry run: return preview without writing ───────────────────────────────────
-  if (dryRun) {
-    const lines: string[] = []
-    lines.push(`# Preview — Feature: ${featureName}`)
-    lines.push(`> This is a dry run. No files have been written.\n`)
-
-    lines.push(`## → ${docsDir}/PRD.md\n`)
-    lines.push(prd)
-    lines.push(`\n---\n\n## → ${docsDir}/ARCHITECTURE.md\n`)
-    lines.push(arch)
-    lines.push(`\n---\n\n## → ${docsDir}/TASKS.md\n`)
-    lines.push(tasks)
-    lines.push(`\n---\n\n## → docs/ARCHITECTURE.md (will be ${existingArch ? "updated" : "created"})\n`)
-    lines.push(updatedArch)
-    lines.push(`\n---\n\n## → docs/features/${slug}.md\n`)
-    lines.push(featureDoc)
-
-    lines.push(`\n---\n\n> Call again with \`dry_run: false\` to write these files.`)
-    return lines.join("\n")
   }
 
-  // ── Write files ───────────────────────────────────────────────────────────────
+  // ── Dry run: write preview files ──────────────────────────────────────────────
+  if (dryRun) {
+    await writeDoc(directory, `${previewDir}/prd.md`, prd)
+    await writeDoc(directory, `${previewDir}/architecture.md`, arch)
+    await writeDoc(directory, `${previewDir}/tasks.md`, tasks)
+    await writeDoc(directory, `${previewDir}/global-architecture.md`, updatedArch)
+    await writeDoc(directory, `${previewDir}/feature-doc.md`, featureDoc)
+
+    return [
+      `# Preview ready — Feature: ${featureName}`,
+      ``,
+      `Open and edit these files freely before finalizing:`,
+      `  - ${previewDir}/prd.md → ${artifactsDir}/PRD.md`,
+      `  - ${previewDir}/architecture.md → ${artifactsDir}/ARCHITECTURE.md`,
+      `  - ${previewDir}/tasks.md → ${artifactsDir}/TASKS.md`,
+      `  - ${previewDir}/global-architecture.md → docs/ARCHITECTURE.md (will be ${existingArch ? "updated" : "created"})`,
+      `  - ${previewDir}/feature-doc.md → docs/features/${slug}.md`,
+      ``,
+      `When ready, call \`workflow_feature\` again with the same arguments and \`dry_run: false\` to save to their final locations.`,
+    ].join("\n")
+  }
+
+  // ── Write real files ──────────────────────────────────────────────────────────
   const lines: string[] = []
   lines.push(`# Workflow: ${featureName}`)
   lines.push(`> Started at ${new Date().toISOString()}\n`)
 
-  const prdPath = await writeDoc(directory, `${docsDir}/PRD.md`, formatDoc("PRD", featureName, prd))
+  if (hasPreview) lines.push(`> Loaded from preview (including any edits you made).\n`)
+
+  const prdPath = await writeDoc(directory, `${artifactsDir}/PRD.md`, formatDoc("PRD", featureName, prd))
   lines.push(`   ✓ PRD written → ${prdPath}`)
 
-  const archPath = await writeDoc(directory, `${docsDir}/ARCHITECTURE.md`, formatDoc("Architecture", featureName, arch))
+  const archPath = await writeDoc(directory, `${artifactsDir}/ARCHITECTURE.md`, formatDoc("Architecture", featureName, arch))
   lines.push(`   ✓ Architecture written → ${archPath}`)
 
-  const tasksPath = await writeDoc(directory, `${docsDir}/TASKS.md`, formatDoc("Task Breakdown", featureName, tasks))
+  const tasksPath = await writeDoc(directory, `${artifactsDir}/TASKS.md`, formatDoc("Task Breakdown", featureName, tasks))
   lines.push(`   ✓ Tasks written → ${tasksPath}`)
 
   const globalArchPath = await writeDoc(directory, "docs/ARCHITECTURE.md", updatedArch)
@@ -171,8 +201,13 @@ Include:
   const featureDocPath = await writeDoc(directory, `docs/features/${slug}.md`, featureDoc)
   lines.push(`   ✓ Feature doc written → ${featureDocPath}`)
 
+  if (hasPreview) {
+    await rm(join(directory, previewDir), { recursive: true, force: true })
+    lines.push(`   ✓ Preview cleaned up`)
+  }
+
   lines.push(`\n## Done ✓`)
-  lines.push(`Workflow artifacts in \`${docsDir}/\`:`)
+  lines.push(`Workflow artifacts in \`${artifactsDir}/\`:`)
   lines.push(`  - PRD.md`)
   lines.push(`  - ARCHITECTURE.md`)
   lines.push(`  - TASKS.md`)
