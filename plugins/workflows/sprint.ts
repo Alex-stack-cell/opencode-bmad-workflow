@@ -56,8 +56,8 @@ async function generateSprintContent(args: SprintArgs) {
 
   const currentStatus = await readSprintStatus(directory)
   const backlogContext = currentStatus
-    ? `Current sprint-status.yaml:\n\`\`\`yaml\n${currentStatus}\n\`\`\`\n\nSelect stories with status "backlog" that fit this sprint.`
-    : `No sprint-status.yaml found. List the stories that should be planned based on the sprint goal.`
+    ? `Current sprint-status.yaml:\n\`\`\`yaml\n${currentStatus}\n\`\`\`\n\nSelect stories with status "ready-for-dev" that fit this sprint. Do NOT invent stories that are not in this file.`
+    : `No sprint-status.yaml found. Do NOT invent stories — return an empty plan and ask the user to create stories first.`
 
   const plan = await runAgentSession({ ...runCtx, directory }, "pm", `
 Create a sprint plan using BMAD methodology.
@@ -82,6 +82,37 @@ async function runSprintPreview(args: SprintArgs): Promise<string> {
   const { sprintGoal, directory } = args
   const slug = slugify(sprintGoal)
   const previewDir = `ai-artifacts/.previews/sprint-${slug}`
+
+  // Guard: check that there are stories ready to plan before calling the LLM
+  const yaml = await readSprintStatus(directory)
+  if (!yaml) {
+    return [
+      `# Sprint planning not ready`,
+      ``,
+      `No \`sprint-status.yaml\` found — no epics or stories have been created yet.`,
+      ``,
+      `Suggested workflow:`,
+      `  1. \`/workflow-epic\` — define your first epic`,
+      `  2. \`/workflow-story\` — create stories for that epic`,
+      `  3. \`/workflow-status\` — confirm stories are in \`ready-for-dev\``,
+      `  4. \`/workflow-sprint\` — plan your sprint`,
+    ].join("\n")
+  }
+
+  const hasReadyStories = yaml.includes("ready-for-dev")
+  if (!hasReadyStories) {
+    return [
+      `# Sprint planning not ready`,
+      ``,
+      `No stories with status \`ready-for-dev\` found in \`sprint-status.yaml\`.`,
+      `A sprint should select from stories that are already defined and ready.`,
+      ``,
+      `Suggested workflow:`,
+      `  1. \`/workflow-story\` — create stories for your epics`,
+      `  2. \`/workflow-status\` — confirm stories appear as \`ready-for-dev\``,
+      `  3. \`/workflow-sprint\` — come back here to plan the sprint`,
+    ].join("\n")
+  }
 
   const { plan } = await generateSprintContent(args)
 
