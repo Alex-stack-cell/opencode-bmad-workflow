@@ -11,7 +11,12 @@ export async function readDoc(projectDir: string, relativePath: string): Promise
 }
 
 export function slugify(s: string): string {
-  return s.toLowerCase().replaceAll(/\s+/g, "-").replaceAll(/[^a-z0-9-]/g, "")
+  return s
+    .normalize("NFD")
+    .replaceAll(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replaceAll(/\s+/g, "-")
+    .replaceAll(/[^a-z0-9-]/g, "")
 }
 
 export async function writeDoc(
