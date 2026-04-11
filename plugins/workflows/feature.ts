@@ -8,77 +8,52 @@ import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
 // ─── Metadata ─────────────────────────────────────────────────────────────────
 
 export const meta = {
-  name: "workflow_feature",
+  name: "workflow_feature_save",
   summary: "New feature",
   chain: "PM (PRD) → Architect (architecture) → PM (tasks) → updates docs/",
   generates: "ai-artifacts/[feature]/PRD.md, ARCHITECTURE.md, TASKS.md + docs/",
 }
 
-// ─── Tool factory ─────────────────────────────────────────────────────────────
+// ─── Tool factories ───────────────────────────────────────────────────────────
 
-export function createFeatureTool(ctx: WorkflowCtx) {
+export function createFeaturePreviewTool(ctx: WorkflowCtx) {
   return tool({
     description:
-      "Feature workflow: PM writes PRD → Architect designs architecture → PM breaks down tasks. Updates docs/. Pass dry_run: true to write a preview to ai-artifacts/.previews/ for review before committing. IMPORTANT: Never call this tool without explicit feature_name and feature_description provided by the user.",
+      "Feature workflow — Step 1/2: Generate PRD, architecture, and tasks, then write them to ai-artifacts/.previews/ for the user to review and edit. Always call this before workflow_feature_save. IMPORTANT: Never call this tool without explicit feature_name and feature_description provided by the user.",
     args: {
-      feature_name: tool.schema
-        .string()
-        .describe("Short feature name explicitly provided by the user. Never invent this."),
-      feature_description: tool.schema
-        .string()
-        .describe("Detailed description explicitly provided by the user. Never invent this."),
-      dry_run: tool.schema
-        .boolean()
-        .optional()
-        .describe("If true, write a preview to ai-artifacts/.previews/ without touching real files. The user can edit the preview, then call again with dry_run: false to finalize. Default: false."),
+      feature_name: tool.schema.string().describe("Short feature name explicitly provided by the user. Never invent this."),
+      feature_description: tool.schema.string().describe("Detailed description explicitly provided by the user. Never invent this."),
     },
     execute: (args) =>
       withSession(ctx, (runCtx) =>
-        runFeatureWorkflow({
-          ...runCtx,
-          featureName: args.feature_name,
-          featureDescription: args.feature_description,
-          dryRun: args.dry_run ?? false,
-        }),
+        runFeaturePreview({ ...runCtx, featureName: args.feature_name, featureDescription: args.feature_description }),
+      ),
+  })
+}
+
+export function createFeatureSaveTool(ctx: WorkflowCtx) {
+  return tool({
+    description:
+      "Feature workflow — Step 2/2: Save the feature docs to their final locations. Reads from ai-artifacts/.previews/ if a preview exists (preserving user edits), otherwise generates fresh. Call workflow_feature_preview first.",
+    args: {
+      feature_name: tool.schema.string().describe("Same feature name used in workflow_feature_preview."),
+      feature_description: tool.schema.string().describe("Same feature description used in workflow_feature_preview."),
+    },
+    execute: (args) =>
+      withSession(ctx, (runCtx) =>
+        runFeatureSave({ ...runCtx, featureName: args.feature_name, featureDescription: args.feature_description }),
       ),
   })
 }
 
 // ─── Workflow implementation ──────────────────────────────────────────────────
 
-type FeatureArgs = WorkflowRunCtx & { featureName: string; featureDescription: string; dryRun: boolean }
+type FeatureArgs = WorkflowRunCtx & { featureName: string; featureDescription: string }
 
-async function runFeatureWorkflow({ featureName, featureDescription, dryRun, ...runCtx }: FeatureArgs): Promise<string> {
-  const { directory } = runCtx
-  const slug = featureName.toLowerCase().replace(/\s+/g, "-")
-  const previewDir = `ai-artifacts/.previews/feature-${slug}`
-  const artifactsDir = `ai-artifacts/${timestamp()}-${slug}`
+async function generateFeatureContent(args: FeatureArgs) {
+  const { featureName, featureDescription, directory, ...runCtx } = args
 
-  // ── Check for existing preview (user may have edited it) ──────────────────────
-  const previewPrd = await readDoc(directory, `${previewDir}/prd.md`)
-  const previewArch = await readDoc(directory, `${previewDir}/architecture.md`)
-  const previewTasks = await readDoc(directory, `${previewDir}/tasks.md`)
-  const previewGlobalArch = await readDoc(directory, `${previewDir}/global-architecture.md`)
-  const previewFeatureDoc = await readDoc(directory, `${previewDir}/feature-doc.md`)
-  const hasPreview = !!previewPrd && !!previewArch && !!previewTasks
-
-  // ── Generate or reuse content ─────────────────────────────────────────────────
-  let prd: string
-  let arch: string
-  let tasks: string
-  let updatedArch: string
-  let featureDoc: string
-  let existingArch: string
-
-  if (!dryRun && hasPreview) {
-    prd = previewPrd
-    arch = previewArch
-    tasks = previewTasks
-    existingArch = await readDoc(directory, "docs/ARCHITECTURE.md")
-    updatedArch = previewGlobalArch || existingArch
-    featureDoc = previewFeatureDoc || ""
-  } else {
-    prd = await runAgentSession(runCtx, "pm", `
+  const prd = await runAgentSession({ ...runCtx, directory }, "pm", `
 Write a complete PRD for the following feature using BMAD methodology.
 
 Feature: ${featureName}
@@ -92,7 +67,7 @@ Include:
 - Technical notes
 `.trim())
 
-    arch = await runAgentSession(runCtx, "architect", `
+  const arch = await runAgentSession({ ...runCtx, directory }, "architect", `
 Based on this PRD, design the technical architecture.
 
 ${prd}
@@ -105,7 +80,7 @@ Produce:
 - Risks & mitigations
 `.trim())
 
-    tasks = await runAgentSession(runCtx, "pm", `
+  const tasks = await runAgentSession({ ...runCtx, directory }, "pm", `
 Based on this PRD and architecture, create a detailed task breakdown.
 
 PRD:
@@ -122,8 +97,8 @@ Format as a numbered task list with:
 - Best suited agent (frontend / architect / reviewer / analyst)
 `.trim())
 
-    existingArch = await readDoc(directory, "docs/ARCHITECTURE.md")
-    updatedArch = await runAgentSession(runCtx, "architect", `
+  const existingArch = await readDoc(directory, "docs/ARCHITECTURE.md")
+  const updatedArch = await runAgentSession({ ...runCtx, directory }, "architect", `
 Update the global architecture document to include decisions made for this feature.
 
 ${existingArch
@@ -139,7 +114,7 @@ The document should:
 - Be useful for a new developer understanding the codebase
 `.trim())
 
-    featureDoc = await runAgentSession(runCtx, "pm", `
+  const featureDoc = await runAgentSession({ ...runCtx, directory }, "pm", `
 Write a concise feature documentation page for a developer reference guide.
 
 Feature: ${featureName}
@@ -155,35 +130,74 @@ Include:
 - Technical summary (how it works, key components)
 - Acceptance criteria (condensed)
 `.trim())
+
+  return { prd, arch, tasks, updatedArch, featureDoc, existingArch }
+}
+
+async function runFeaturePreview(args: FeatureArgs): Promise<string> {
+  const { featureName, directory } = args
+  const slug = featureName.toLowerCase().replaceAll(/\s+/g, "-")
+  const previewDir = `ai-artifacts/.previews/feature-${slug}`
+
+  const { prd, arch, tasks, updatedArch, featureDoc, existingArch } = await generateFeatureContent(args)
+
+  await writeDoc(directory, `${previewDir}/prd.md`, prd)
+  await writeDoc(directory, `${previewDir}/architecture.md`, arch)
+  await writeDoc(directory, `${previewDir}/tasks.md`, tasks)
+  await writeDoc(directory, `${previewDir}/global-architecture.md`, updatedArch)
+  await writeDoc(directory, `${previewDir}/feature-doc.md`, featureDoc)
+
+  return [
+    `# Preview ready — Feature: ${featureName}`,
+    ``,
+    `Open and edit these files freely before finalizing:`,
+    `  - ${previewDir}/prd.md → ai-artifacts/[timestamp]-${slug}/PRD.md`,
+    `  - ${previewDir}/architecture.md → ai-artifacts/[timestamp]-${slug}/ARCHITECTURE.md`,
+    `  - ${previewDir}/tasks.md → ai-artifacts/[timestamp]-${slug}/TASKS.md`,
+    `  - ${previewDir}/global-architecture.md → docs/ARCHITECTURE.md (will be ${existingArch ? "updated" : "created"})`,
+    `  - ${previewDir}/feature-doc.md → docs/features/${slug}.md`,
+    ``,
+    `When ready, call \`workflow_feature_save\` with the same arguments to write to their final locations.`,
+  ].join("\n")
+}
+
+async function runFeatureSave(args: FeatureArgs): Promise<string> {
+  const { featureName, directory } = args
+  const slug = featureName.toLowerCase().replaceAll(/\s+/g, "-")
+  const previewDir = `ai-artifacts/.previews/feature-${slug}`
+  const artifactsDir = `ai-artifacts/${timestamp()}-${slug}`
+
+  const previewPrd = await readDoc(directory, `${previewDir}/prd.md`)
+  const previewArch = await readDoc(directory, `${previewDir}/architecture.md`)
+  const previewTasks = await readDoc(directory, `${previewDir}/tasks.md`)
+  const previewGlobalArch = await readDoc(directory, `${previewDir}/global-architecture.md`)
+  const previewFeatureDoc = await readDoc(directory, `${previewDir}/feature-doc.md`)
+  const hasPreview = !!previewPrd && !!previewArch && !!previewTasks
+
+  let prd: string
+  let arch: string
+  let tasks: string
+  let updatedArch: string
+  let featureDoc: string
+
+  if (hasPreview) {
+    prd = previewPrd
+    arch = previewArch
+    tasks = previewTasks
+    updatedArch = previewGlobalArch || await readDoc(directory, "docs/ARCHITECTURE.md")
+    featureDoc = previewFeatureDoc
+  } else {
+    const generated = await generateFeatureContent(args)
+    prd = generated.prd
+    arch = generated.arch
+    tasks = generated.tasks
+    updatedArch = generated.updatedArch
+    featureDoc = generated.featureDoc
   }
 
-  // ── Dry run: write preview files ──────────────────────────────────────────────
-  if (dryRun) {
-    await writeDoc(directory, `${previewDir}/prd.md`, prd)
-    await writeDoc(directory, `${previewDir}/architecture.md`, arch)
-    await writeDoc(directory, `${previewDir}/tasks.md`, tasks)
-    await writeDoc(directory, `${previewDir}/global-architecture.md`, updatedArch)
-    await writeDoc(directory, `${previewDir}/feature-doc.md`, featureDoc)
-
-    return [
-      `# Preview ready — Feature: ${featureName}`,
-      ``,
-      `Open and edit these files freely before finalizing:`,
-      `  - ${previewDir}/prd.md → ${artifactsDir}/PRD.md`,
-      `  - ${previewDir}/architecture.md → ${artifactsDir}/ARCHITECTURE.md`,
-      `  - ${previewDir}/tasks.md → ${artifactsDir}/TASKS.md`,
-      `  - ${previewDir}/global-architecture.md → docs/ARCHITECTURE.md (will be ${existingArch ? "updated" : "created"})`,
-      `  - ${previewDir}/feature-doc.md → docs/features/${slug}.md`,
-      ``,
-      `When ready, call \`workflow_feature\` again with the same arguments and \`dry_run: false\` to save to their final locations.`,
-    ].join("\n")
-  }
-
-  // ── Write real files ──────────────────────────────────────────────────────────
   const lines: string[] = []
   lines.push(`# Workflow: ${featureName}`)
   lines.push(`> Started at ${new Date().toISOString()}\n`)
-
   if (hasPreview) lines.push(`> Loaded from preview (including any edits you made).\n`)
 
   const prdPath = await writeDoc(directory, `${artifactsDir}/PRD.md`, formatDoc("PRD", featureName, prd))
@@ -214,7 +228,7 @@ Include:
   lines.push(`Project documentation updated:`)
   lines.push(`  - docs/ARCHITECTURE.md`)
   lines.push(`  - docs/features/${slug}.md`)
-  lines.push(`\nYou can now continue manually or run \`workflow_review\` after implementation.`)
+  lines.push(`\nYou can now continue manually or run \`workflow_review_preview\` after implementation.`)
 
   return lines.join("\n")
 }

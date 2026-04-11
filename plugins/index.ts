@@ -1,9 +1,9 @@
 import { tool } from "@opencode-ai/plugin"
 import type { OpencodeClient } from "@opencode-ai/sdk"
-import { createEpicsTool, createEpicTool, meta as epicMeta, metaOverview as epicsMetaOverview } from "./workflows/epic.ts"
-import { createFeatureTool, meta as featureMeta } from "./workflows/feature.ts"
-import { createSprintTool, meta as sprintMeta } from "./workflows/sprint.ts"
-import { createReviewTool, meta as reviewMeta } from "./workflows/review.ts"
+import { createEpicsTool, createEpicPreviewTool, createEpicSaveTool, meta as epicMeta, metaOverview as epicsMetaOverview } from "./workflows/epic.ts"
+import { createFeaturePreviewTool, createFeatureSaveTool, meta as featureMeta } from "./workflows/feature.ts"
+import { createSprintPreviewTool, createSprintSaveTool, meta as sprintMeta } from "./workflows/sprint.ts"
+import { createReviewPreviewTool, createReviewSaveTool, meta as reviewMeta } from "./workflows/review.ts"
 import { loadConfig, saveConfig } from "./utils/config.ts"
 import type { WorkflowConfig } from "./types/workflow.ts"
 
@@ -28,7 +28,7 @@ function buildInitText(config: WorkflowConfig): string {
   lines.push("---")
   lines.push("All docs are saved in `ai-artifacts/` at the project root.")
   lines.push(`\nCurrent language: \`${config.language}\` — use \`workflow_setup\` to change it.`)
-  lines.push("\nStart with `workflow_epics` to see your roadmap, or `workflow_epic` to create your first epic.")
+  lines.push("\nEach workflow has two steps: call `_preview` first, review/edit the files, then call `_save`.")
   return lines.join("\n")
 }
 
@@ -66,10 +66,14 @@ async function WorkflowPlugin(ctx: PluginCtx) {
         },
       }),
       workflow_epics: createEpicsTool(wfCtx),
-      workflow_epic: createEpicTool(wfCtx),
-      workflow_feature: createFeatureTool(wfCtx),
-      workflow_sprint: createSprintTool(wfCtx),
-      workflow_review: createReviewTool(wfCtx),
+      workflow_epic_preview: createEpicPreviewTool(wfCtx),
+      workflow_epic_save: createEpicSaveTool(wfCtx),
+      workflow_feature_preview: createFeaturePreviewTool(wfCtx),
+      workflow_feature_save: createFeatureSaveTool(wfCtx),
+      workflow_sprint_preview: createSprintPreviewTool(wfCtx),
+      workflow_sprint_save: createSprintSaveTool(wfCtx),
+      workflow_review_preview: createReviewPreviewTool(wfCtx),
+      workflow_review_save: createReviewSaveTool(wfCtx),
     },
   }
 }

@@ -41,10 +41,14 @@ const WORKFLOW_TOOLS_DISABLED: Record<string, boolean> = {
   workflow_init: false,
   workflow_setup: false,
   workflow_epics: false,
-  workflow_epic: false,
-  workflow_feature: false,
-  workflow_sprint: false,
-  workflow_review: false,
+  workflow_epic_preview: false,
+  workflow_epic_save: false,
+  workflow_feature_preview: false,
+  workflow_feature_save: false,
+  workflow_sprint_preview: false,
+  workflow_sprint_save: false,
+  workflow_review_preview: false,
+  workflow_review_save: false,
 }
 
 function getLanguageLabel(language: string): string {
