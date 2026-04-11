@@ -1,7 +1,7 @@
 import { tool } from "@opencode-ai/plugin"
 import type { OpencodeClient } from "@opencode-ai/sdk"
-import { createEpicsTool, createEpicPreviewTool, createEpicSaveTool, meta as epicMeta, metaOverview as epicsMetaOverview } from "./workflows/epic.ts"
-import { createFeaturePreviewTool, createFeatureSaveTool, meta as featureMeta } from "./workflows/feature.ts"
+import { createStatusTool, createEpicPreviewTool, createEpicSaveTool, meta as epicMeta, metaStatus } from "./workflows/epic.ts"
+import { createStoryPreviewTool, createStorySaveTool, meta as storyMeta } from "./workflows/story.ts"
 import { createSprintPreviewTool, createSprintSaveTool, meta as sprintMeta } from "./workflows/sprint.ts"
 import { createReviewPreviewTool, createReviewSaveTool, meta as reviewMeta } from "./workflows/review.ts"
 import { loadConfig, saveConfig } from "./utils/config.ts"
@@ -14,7 +14,7 @@ type PluginCtx = {
   project: { root: string }
 }
 
-const allMeta = [epicsMetaOverview, epicMeta, featureMeta, sprintMeta, reviewMeta]
+const allMeta = [metaStatus, epicMeta, storyMeta, sprintMeta, reviewMeta]
 
 const SUPPORTED_LANGUAGES = ["en", "fr", "es", "de", "pt", "it", "ja", "zh"] as const
 
@@ -47,7 +47,7 @@ async function WorkflowPlugin(ctx: PluginCtx) {
         },
       }),
       workflow_setup: tool({
-        description: "Configure workflow preferences for this project. Sets the language used for all generated documents (epics, features, sprints, reviews).",
+        description: "Configure workflow preferences for this project. Sets the language used for all generated documents (epics, stories, sprints, reviews).",
         args: {
           language: tool.schema
             .enum(SUPPORTED_LANGUAGES)
@@ -65,11 +65,11 @@ async function WorkflowPlugin(ctx: PluginCtx) {
           ].join("\n")
         },
       }),
-      workflow_epics: createEpicsTool(wfCtx),
+      workflow_status: createStatusTool(wfCtx),
       workflow_epic_preview: createEpicPreviewTool(wfCtx),
       workflow_epic_save: createEpicSaveTool(wfCtx),
-      workflow_feature_preview: createFeaturePreviewTool(wfCtx),
-      workflow_feature_save: createFeatureSaveTool(wfCtx),
+      workflow_story_preview: createStoryPreviewTool(wfCtx),
+      workflow_story_save: createStorySaveTool(wfCtx),
       workflow_sprint_preview: createSprintPreviewTool(wfCtx),
       workflow_sprint_save: createSprintSaveTool(wfCtx),
       workflow_review_preview: createReviewPreviewTool(wfCtx),

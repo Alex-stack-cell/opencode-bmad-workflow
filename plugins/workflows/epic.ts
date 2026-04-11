@@ -1,7 +1,8 @@
 import { tool } from "@opencode-ai/plugin"
 import { runAgentSession, withSession } from "../utils/session.ts"
-import { writeDoc, readDoc, formatDoc } from "../utils/files.ts"
-import { readdir, readFile, rm } from "node:fs/promises"
+import { writeDoc, readDoc } from "../utils/files.ts"
+import { readSprintStatus, writeSprintStatus } from "../utils/status.ts"
+import { rm } from "node:fs/promises"
 import { join } from "node:path"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
 
@@ -10,25 +11,25 @@ import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
 export const meta = {
   name: "workflow_epic_save",
   summary: "New epic",
-  chain: "PM (scope) → updates docs/ROADMAP.md",
-  generates: "ai-artifacts/epics/[epic].md",
+  chain: "PM (scope) → updates docs/OVERVIEW.md, docs/ROADMAP.md, sprint-status.yaml",
+  generates: "ai-artifacts/planning-artifacts/epic-[n]-[slug].md",
 }
 
-export const metaOverview = {
-  name: "workflow_epics",
-  summary: "Roadmap overview",
-  chain: "Lists all existing epics with priority and inferred status",
+export const metaStatus = {
+  name: "workflow_status",
+  summary: "Project status",
+  chain: "Reads sprint-status.yaml",
   generates: "(read-only)",
 }
 
 // ─── Tool factories ───────────────────────────────────────────────────────────
 
-export function createEpicsTool(ctx: WorkflowCtx) {
+export function createStatusTool(ctx: WorkflowCtx) {
   return tool({
     description:
-      "Show a roadmap overview: list all existing epics from ai-artifacts/epics/ with their priority, effort, and inferred status.",
+      "Show the current project status: all epics and their stories with statuses from sprint-status.yaml. Use this to get an overview before planning a sprint or creating a story.",
     args: {},
-    execute: () => withSession(ctx, runEpicsOverview),
+    execute: () => withSession(ctx, runStatus),
   })
 }
 
@@ -51,7 +52,7 @@ export function createEpicPreviewTool(ctx: WorkflowCtx) {
 export function createEpicSaveTool(ctx: WorkflowCtx) {
   return tool({
     description:
-      "Epic workflow — Step 2/2: Save the epic to its final locations. Reads from ai-artifacts/.previews/ if a preview exists (preserving user edits), otherwise generates fresh. Call workflow_epic_preview first.",
+      "Epic workflow — Step 2/2: Save the epic to its final locations and update sprint-status.yaml. Reads from ai-artifacts/.previews/ if a preview exists (preserving user edits). Call workflow_epic_preview first.",
     args: {
       epic_name: tool.schema.string().describe("Same epic name used in workflow_epic_preview."),
       epic_goal: tool.schema.string().describe("Same epic goal used in workflow_epic_preview."),
@@ -66,57 +67,27 @@ export function createEpicSaveTool(ctx: WorkflowCtx) {
 
 // ─── Workflow implementations ─────────────────────────────────────────────────
 
-async function runEpicsOverview(runCtx: WorkflowRunCtx): Promise<string> {
+async function runStatus(runCtx: WorkflowRunCtx): Promise<string> {
   const { directory } = runCtx
-  const epicsDir = join(directory, "ai-artifacts/epics")
-  const lines: string[] = []
+  const yaml = await readSprintStatus(directory)
 
-  lines.push("# Epic Roadmap Overview")
-  lines.push(`> Generated at ${new Date().toISOString()}\n`)
-
-  let epicFiles: string[] = []
-  try {
-    const entries = await readdir(epicsDir)
-    epicFiles = entries.filter((f) => f.endsWith(".md") && !f.includes("-features"))
-  } catch {
-    return [...lines, "No epics found yet in `ai-artifacts/epics/`.\n", "Use `workflow_epic_preview` to create your first epic."].join("\n")
+  if (!yaml) {
+    return [
+      "# Project Status",
+      "",
+      "No epics yet. Use `workflow_epic_preview` to create your first epic.",
+    ].join("\n")
   }
 
-  if (epicFiles.length === 0) {
-    return [...lines, "No epics found yet in `ai-artifacts/epics/`.\n", "Use `workflow_epic_preview` to create your first epic."].join("\n")
-  }
-
-  const epicContents: string[] = []
-  for (const file of epicFiles) {
-    const content = await readFile(join(epicsDir, file), "utf-8")
-    epicContents.push(`### ${file}\n\n${content}`)
-  }
-
-  const overview = await runAgentSession(runCtx, "analyst", `
-Produce a concise roadmap overview from these epic definitions.
-
-${epicContents.join("\n\n---\n\n")}
-
-For each epic:
-- Name and one-line description
-- Priority
-- Rough effort
-- Features listed
-- Inferred status: TODO / IN PROGRESS / DONE (based on content clues)
-
-Format as a prioritized table or list. End with a recommendation for which epic to tackle next.
-`.trim())
-
-  lines.push(overview)
-  return lines.join("\n")
+  return ["# Project Status\n", "```yaml", yaml, "```"].join("\n")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 type EpicArgs = WorkflowRunCtx & { epicName: string; epicGoal: string; priority: "HIGH" | "MEDIUM" | "LOW" }
 
 async function generateEpicContent(args: EpicArgs) {
   const { epicName, epicGoal, priority, directory, ...runCtx } = args
-  const overviewPath = `docs/OVERVIEW.md`
-  const roadmapPath = `docs/ROADMAP.md`
 
   const epicDef = await runAgentSession({ ...runCtx, directory }, "pm", `
 Define a high-level epic using BMAD methodology.
@@ -134,7 +105,7 @@ Include:
 - Priority: ${priority} (set by the user — do not change this)
 `.trim())
 
-  const existingOverview = await readDoc(directory, overviewPath)
+  const existingOverview = await readDoc(directory, "docs/OVERVIEW.md")
   const overviewContent = existingOverview ? null : await runAgentSession({ ...runCtx, directory }, "pm", `
 Create a concise project overview document based on the codebase context.
 
@@ -148,13 +119,13 @@ Do NOT include epics, roadmap, or planning information — that belongs in ROADM
 Keep it stable: this document should rarely need to change.
 `.trim())
 
-  const existingRoadmap = await readDoc(directory, roadmapPath)
+  const existingRoadmap = await readDoc(directory, "docs/ROADMAP.md")
   const updatedRoadmap = await runAgentSession({ ...runCtx, directory }, "pm", `
 Update the project roadmap to include this new epic.
 
 ${existingRoadmap
-  ? `Existing ROADMAP.md:\n${existingRoadmap}\n\n---\n\nAdd or update the entry for this epic. Keep all existing epics intact. Do NOT invent new ones.`
-  : `No roadmap exists yet. Create one from scratch with only this epic.`}
+    ? `Existing ROADMAP.md:\n${existingRoadmap}\n\n---\n\nAdd or update the entry for this epic. Keep all existing epics intact. Do NOT invent new ones.`
+    : `No roadmap exists yet. Create one from scratch with only this epic.`}
 
 Epic to add:
 ${epicDef}
@@ -169,7 +140,7 @@ Format:
 
 async function runEpicPreview(args: EpicArgs): Promise<string> {
   const { epicName, directory } = args
-  const slug = epicName.toLowerCase().replaceAll(/\s+/g, "-")
+  const slug = epicName.toLowerCase().replaceAll(/\s+/g, "-").replaceAll(/[^a-z0-9-]/g, "")
   const previewDir = `ai-artifacts/.previews/epic-${slug}`
 
   const { epicDef, overviewContent, updatedRoadmap, existingRoadmap } = await generateEpicContent(args)
@@ -179,9 +150,10 @@ async function runEpicPreview(args: EpicArgs): Promise<string> {
   await writeDoc(directory, `${previewDir}/roadmap.md`, updatedRoadmap)
 
   const files = [
-    `  - ${previewDir}/epic.md → ai-artifacts/epics/${slug}.md`,
+    `  - ${previewDir}/epic.md → ai-artifacts/planning-artifacts/epic-[n]-${slug}.md`,
     overviewContent ? `  - ${previewDir}/overview.md → docs/OVERVIEW.md (will be created)` : null,
     `  - ${previewDir}/roadmap.md → docs/ROADMAP.md (will be ${existingRoadmap ? "updated" : "created"})`,
+    `  - (sprint-status.yaml will be updated on save)`,
   ].filter(Boolean)
 
   return [
@@ -195,11 +167,9 @@ async function runEpicPreview(args: EpicArgs): Promise<string> {
 }
 
 async function runEpicSave(args: EpicArgs): Promise<string> {
-  const { epicName, directory } = args
-  const slug = epicName.toLowerCase().replaceAll(/\s+/g, "-")
+  const { epicName, epicGoal, priority, directory, ...runCtx } = args
+  const slug = epicName.toLowerCase().replaceAll(/\s+/g, "-").replaceAll(/[^a-z0-9-]/g, "")
   const previewDir = `ai-artifacts/.previews/epic-${slug}`
-  const overviewPath = `docs/OVERVIEW.md`
-  const roadmapPath = `docs/ROADMAP.md`
 
   const previewEpic = await readDoc(directory, `${previewDir}/epic.md`)
   const previewRoadmap = await readDoc(directory, `${previewDir}/roadmap.md`)
@@ -215,27 +185,61 @@ async function runEpicSave(args: EpicArgs): Promise<string> {
     overviewContent = previewOverview || null
     updatedRoadmap = previewRoadmap
   } else {
-    const generated = await generateEpicContent(args)
+    const generated = await generateEpicContent({ ...runCtx, directory, epicName, epicGoal, priority })
     epicDef = generated.epicDef
     overviewContent = generated.overviewContent
     updatedRoadmap = generated.updatedRoadmap
   }
 
+  // Update sprint-status.yaml — delegate yaml manipulation to LLM
+  const existingStatus = await readSprintStatus(directory)
+  const updatedStatus = await runAgentSession({ ...runCtx, directory }, "pm", `
+Update this sprint-status.yaml to add a new epic entry.
+
+${existingStatus
+    ? `Existing sprint-status.yaml:\n\`\`\`yaml\n${existingStatus}\n\`\`\`\n\nAdd the new epic below. Use the next available integer ID. Keep all existing entries intact.`
+    : `No sprint-status.yaml exists yet. Create one from scratch with only this epic.`}
+
+New epic to add:
+- name: "${epicName}"
+- goal: "${epicGoal}"
+- priority: ${priority}
+- status: planned
+- stories: []
+
+Output ONLY the raw YAML content, no markdown fences, no explanation.
+
+Format (follow exactly):
+epics:
+  - id: 1
+    name: "Epic name"
+    status: planned
+    priority: HIGH
+    stories: []
+`.trim())
+
   const lines: string[] = []
   lines.push(`# Workflow: Epic — ${epicName}`)
-  lines.push(`> Started at ${new Date().toISOString()}\n`)
   if (hasPreview) lines.push(`> Loaded from preview (including any edits you made).\n`)
 
-  const epicFilePath = await writeDoc(directory, `ai-artifacts/epics/${slug}.md`, formatDoc("Epic", epicName, epicDef))
+  // Determine epic ID from updated status (for filename)
+  const epicIdLine = updatedStatus.split("\n").findIndex((l) => l.includes(`name: "${epicName}"`))
+  const epicIdRaw = epicIdLine > 0 ? updatedStatus.split("\n").slice(Math.max(0, epicIdLine - 2), epicIdLine).join("\n").match(/id:\s*(\d+)/)?.[1] : null
+  const epicId = epicIdRaw ?? "n"
+
+  const epicFilePath = await writeDoc(directory, `ai-artifacts/planning-artifacts/epic-${epicId}-${slug}.md`, epicDef)
   lines.push(`   ✓ Epic written → ${epicFilePath}`)
 
   if (overviewContent) {
-    const overviewFilePath = await writeDoc(directory, overviewPath, overviewContent)
+    const overviewFilePath = await writeDoc(directory, "docs/OVERVIEW.md", overviewContent)
     lines.push(`   ✓ Overview created → ${overviewFilePath}`)
   }
 
-  const roadmapFilePath = await writeDoc(directory, roadmapPath, updatedRoadmap)
+  const roadmapFilePath = await writeDoc(directory, "docs/ROADMAP.md", updatedRoadmap)
   lines.push(`   ✓ Roadmap updated → ${roadmapFilePath}`)
+
+  const statusPath = await writeSprintStatus(directory, updatedStatus)
+  lines.push(`   ✓ Sprint status updated → ${statusPath}`)
 
   if (hasPreview) {
     await rm(join(directory, previewDir), { recursive: true, force: true })
@@ -243,10 +247,11 @@ async function runEpicSave(args: EpicArgs): Promise<string> {
   }
 
   lines.push(`\n## Done ✓`)
-  lines.push(`  - ai-artifacts/epics/${slug}.md`)
-  if (overviewContent) lines.push(`  - ${overviewPath} (created)`)
-  lines.push(`  - ${roadmapPath}`)
-  lines.push(`\nReview the epic, then use \`workflow_feature_preview\` for each feature you want to implement.`)
+  lines.push(`  - ai-artifacts/planning-artifacts/epic-${epicId}-${slug}.md`)
+  if (overviewContent) lines.push(`  - docs/OVERVIEW.md (created)`)
+  lines.push(`  - docs/ROADMAP.md`)
+  lines.push(`  - ai-artifacts/sprint-status.yaml`)
+  lines.push(`\nRun \`workflow_story_preview\` for each story you want to implement in this epic.`)
 
   return lines.join("\n")
 }

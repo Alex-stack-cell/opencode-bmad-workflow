@@ -1,6 +1,6 @@
 import { tool } from "@opencode-ai/plugin"
 import { runAgentSession, withSession } from "../utils/session.ts"
-import { writeDoc, readDoc, timestamp, formatDoc } from "../utils/files.ts"
+import { writeDoc, readDoc } from "../utils/files.ts"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
@@ -11,7 +11,7 @@ export const meta = {
   name: "workflow_review_save",
   summary: "Code review",
   chain: "Analyst (analysis) → Reviewer (report)",
-  generates: "ai-artifacts/review-[date]/ANALYSIS.md, REVIEW.md",
+  generates: "ai-artifacts/planning-artifacts/review-[slug]/ANALYSIS.md, REVIEW.md",
 }
 
 // ─── Tool factories ───────────────────────────────────────────────────────────
@@ -99,8 +99,8 @@ async function runReviewPreview(args: ReviewArgs): Promise<string> {
     `# Preview ready — Code Review: ${scopeLabel}`,
     ``,
     `Open and annotate these files freely before finalizing:`,
-    `  - ${previewDir}/analysis.md → ai-artifacts/review-[date]/ANALYSIS.md`,
-    `  - ${previewDir}/review.md → ai-artifacts/review-[date]/REVIEW.md`,
+    `  - ${previewDir}/analysis.md → ai-artifacts/planning-artifacts/review-${slug}/ANALYSIS.md`,
+    `  - ${previewDir}/review.md → ai-artifacts/planning-artifacts/review-${slug}/REVIEW.md`,
     ``,
     `When ready, call \`workflow_review_save\` with the same arguments to write to their final locations.`,
   ].join("\n")
@@ -111,7 +111,7 @@ async function runReviewSave(args: ReviewArgs): Promise<string> {
   const scopeLabel = scope ?? "full diff"
   const slug = (scope ?? "full-diff").toLowerCase().replaceAll(/[^a-z0-9]/g, "-").replaceAll(/-+/g, "-")
   const previewDir = `ai-artifacts/.previews/review-${slug}`
-  const docsDir = `ai-artifacts/review-${timestamp()}`
+  const docsDir = `ai-artifacts/planning-artifacts/review-${slug}`
 
   const previewAnalysis = await readDoc(directory, `${previewDir}/analysis.md`)
   const previewReview = await readDoc(directory, `${previewDir}/review.md`)
@@ -134,10 +134,10 @@ async function runReviewSave(args: ReviewArgs): Promise<string> {
   lines.push(`> Started at ${new Date().toISOString()}\n`)
   if (hasPreview) lines.push(`> Loaded from preview (including any edits you made).\n`)
 
-  const analysisPath = await writeDoc(directory, `${docsDir}/ANALYSIS.md`, formatDoc("Code Analysis", scopeLabel, analysis))
+  const analysisPath = await writeDoc(directory, `${docsDir}/ANALYSIS.md`, analysis)
   lines.push(`   ✓ Analysis written → ${analysisPath}`)
 
-  const reviewPath = await writeDoc(directory, `${docsDir}/REVIEW.md`, formatDoc("Code Review Report", scopeLabel, review))
+  const reviewPath = await writeDoc(directory, `${docsDir}/REVIEW.md`, review)
   lines.push(`   ✓ Review written → ${reviewPath}`)
 
   if (hasPreview) {

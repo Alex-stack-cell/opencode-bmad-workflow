@@ -1,6 +1,7 @@
 import { tool } from "@opencode-ai/plugin"
 import { runAgentSession, withSession } from "../utils/session.ts"
-import { writeDoc, readDoc, timestamp, formatDoc } from "../utils/files.ts"
+import { writeDoc, readDoc } from "../utils/files.ts"
+import { readSprintStatus, writeSprintStatus } from "../utils/status.ts"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
@@ -10,8 +11,8 @@ import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
 export const meta = {
   name: "workflow_sprint_save",
   summary: "Sprint planning",
-  chain: "PM (plan) → PM (stories)",
-  generates: "ai-artifacts/sprint-[date]/SPRINT-PLAN.md, STORIES.md",
+  chain: "PM (plan from backlog) → updates sprint-status.yaml story statuses",
+  generates: "ai-artifacts/planning-artifacts/sprint-[slug].md",
 }
 
 // ─── Tool factories ───────────────────────────────────────────────────────────
@@ -19,7 +20,7 @@ export const meta = {
 export function createSprintPreviewTool(ctx: WorkflowCtx) {
   return tool({
     description:
-      "Sprint planning workflow — Step 1/2: Generate sprint plan and user stories, then write them to ai-artifacts/.previews/ for the user to review and edit. Always call this before workflow_sprint_save. IMPORTANT: Never call this tool without explicit sprint_goal provided by the user.",
+      "Sprint planning workflow — Step 1/2: Generate a sprint plan from backlog stories in sprint-status.yaml, then write it to ai-artifacts/.previews/ for the user to review and edit. Always call this before workflow_sprint_save. IMPORTANT: Never call this tool without explicit sprint_goal provided by the user.",
     args: {
       sprint_goal: tool.schema.string().describe("Sprint goal explicitly provided by the user. Never invent this."),
       duration_weeks: tool.schema.number().optional().describe("Sprint duration in weeks (default: 2)."),
@@ -34,7 +35,7 @@ export function createSprintPreviewTool(ctx: WorkflowCtx) {
 export function createSprintSaveTool(ctx: WorkflowCtx) {
   return tool({
     description:
-      "Sprint planning workflow — Step 2/2: Save the sprint docs to their final locations. Reads from ai-artifacts/.previews/ if a preview exists (preserving user edits), otherwise generates fresh. Call workflow_sprint_preview first.",
+      "Sprint planning workflow — Step 2/2: Save the sprint plan and update story statuses in sprint-status.yaml. Reads from ai-artifacts/.previews/ if a preview exists. Call workflow_sprint_preview first.",
     args: {
       sprint_goal: tool.schema.string().describe("Same sprint goal used in workflow_sprint_preview."),
       duration_weeks: tool.schema.number().optional().describe("Sprint duration in weeks (default: 2)."),
@@ -53,34 +54,28 @@ type SprintArgs = WorkflowRunCtx & { sprintGoal: string; durationWeeks?: number 
 async function generateSprintContent(args: SprintArgs) {
   const { sprintGoal, durationWeeks = 2, directory, ...runCtx } = args
 
+  const currentStatus = await readSprintStatus(directory)
+  const backlogContext = currentStatus
+    ? `Current sprint-status.yaml:\n\`\`\`yaml\n${currentStatus}\n\`\`\`\n\nSelect stories with status "backlog" that fit this sprint.`
+    : `No sprint-status.yaml found. List the stories that should be planned based on the sprint goal.`
+
   const plan = await runAgentSession({ ...runCtx, directory }, "pm", `
 Create a sprint plan using BMAD methodology.
 
 Sprint goal: ${sprintGoal}
 Duration: ${durationWeeks} week(s)
 
+${backlogContext}
+
 Include:
 - Sprint goal statement
-- Prioritized user stories for this sprint (in scope)
-- Stories explicitly out of scope (backlog)
+- Selected stories for this sprint (reference by story ID and title from sprint-status.yaml)
+- Stories explicitly out of scope (kept in backlog)
 - Definition of Done
 - Risks and blockers
 `.trim())
 
-  const stories = await runAgentSession({ ...runCtx, directory }, "pm", `
-For each story in this sprint plan, write the full BMAD user story with acceptance criteria.
-
-Sprint plan:
-${plan}
-
-For each story:
-- Full user story (As a / I want / So that)
-- Detailed acceptance criteria (Given/When/Then)
-- Technical notes for developers
-- Effort estimate (S/M/L)
-`.trim())
-
-  return { plan, stories }
+  return { plan, currentStatus }
 }
 
 async function runSprintPreview(args: SprintArgs): Promise<string> {
@@ -88,54 +83,72 @@ async function runSprintPreview(args: SprintArgs): Promise<string> {
   const slug = sprintGoal.toLowerCase().replaceAll(/\s+/g, "-").replaceAll(/[^a-z0-9-]/g, "")
   const previewDir = `ai-artifacts/.previews/sprint-${slug}`
 
-  const { plan, stories } = await generateSprintContent(args)
+  const { plan } = await generateSprintContent(args)
 
   await writeDoc(directory, `${previewDir}/sprint-plan.md`, plan)
-  await writeDoc(directory, `${previewDir}/stories.md`, stories)
 
   return [
     `# Preview ready — Sprint: ${sprintGoal}`,
     ``,
-    `Open and edit these files freely before finalizing:`,
-    `  - ${previewDir}/sprint-plan.md → ai-artifacts/sprint-[date]/SPRINT-PLAN.md`,
-    `  - ${previewDir}/stories.md → ai-artifacts/sprint-[date]/STORIES.md`,
+    `Open and edit this file freely before finalizing:`,
+    `  - ${previewDir}/sprint-plan.md → ai-artifacts/planning-artifacts/sprint-${slug}.md`,
+    `  - (sprint-status.yaml will be updated on save — stories moved to "in-progress")`,
     ``,
-    `When ready, call \`workflow_sprint_save\` with the same arguments to write to their final locations.`,
+    `When ready, call \`workflow_sprint_save\` with the same arguments to write to its final location.`,
   ].join("\n")
 }
 
 async function runSprintSave(args: SprintArgs): Promise<string> {
-  const { sprintGoal, directory } = args
+  const { sprintGoal, directory, ...runCtx } = args
   const slug = sprintGoal.toLowerCase().replaceAll(/\s+/g, "-").replaceAll(/[^a-z0-9-]/g, "")
   const previewDir = `ai-artifacts/.previews/sprint-${slug}`
-  const docsDir = `ai-artifacts/sprint-${timestamp()}`
 
   const previewPlan = await readDoc(directory, `${previewDir}/sprint-plan.md`)
-  const previewStories = await readDoc(directory, `${previewDir}/stories.md`)
-  const hasPreview = !!previewPlan && !!previewStories
+  const hasPreview = !!previewPlan
 
   let plan: string
-  let stories: string
+  let currentStatus: string
 
   if (hasPreview) {
     plan = previewPlan
-    stories = previewStories
+    currentStatus = await readSprintStatus(directory)
   } else {
     const generated = await generateSprintContent(args)
     plan = generated.plan
-    stories = generated.stories
+    currentStatus = generated.currentStatus
   }
 
+  // Update sprint-status.yaml — mark selected stories as in-progress
+  const updatedStatus = currentStatus
+    ? await runAgentSession({ ...runCtx, directory }, "pm", `
+Update sprint-status.yaml to mark the stories selected for this sprint as "in-progress".
+
+Sprint plan (lists which stories are selected):
+${plan}
+
+Current sprint-status.yaml:
+\`\`\`yaml
+${currentStatus}
+\`\`\`
+
+For each story mentioned in the sprint plan as "in scope" or "selected", change its status from "backlog" to "in-progress".
+Leave all other stories unchanged.
+
+Output ONLY the raw YAML content, no markdown fences, no explanation.
+`.trim())
+    : currentStatus
+
   const lines: string[] = []
-  lines.push(`# Workflow: Sprint Planning`)
-  lines.push(`> Started at ${new Date().toISOString()}\n`)
+  lines.push(`# Workflow: Sprint Planning — ${sprintGoal}`)
   if (hasPreview) lines.push(`> Loaded from preview (including any edits you made).\n`)
 
-  const planPath = await writeDoc(directory, `${docsDir}/SPRINT-PLAN.md`, formatDoc("Sprint Plan", sprintGoal, plan))
+  const planPath = await writeDoc(directory, `ai-artifacts/planning-artifacts/sprint-${slug}.md`, plan)
   lines.push(`   ✓ Sprint plan written → ${planPath}`)
 
-  const storiesPath = await writeDoc(directory, `${docsDir}/STORIES.md`, formatDoc("User Stories", sprintGoal, stories))
-  lines.push(`   ✓ Stories written → ${storiesPath}`)
+  if (updatedStatus) {
+    const statusPath = await writeSprintStatus(directory, updatedStatus)
+    lines.push(`   ✓ Sprint status updated → ${statusPath}`)
+  }
 
   if (hasPreview) {
     await rm(join(directory, previewDir), { recursive: true, force: true })
@@ -143,9 +156,8 @@ async function runSprintSave(args: SprintArgs): Promise<string> {
   }
 
   lines.push(`\n## Done ✓`)
-  lines.push(`Generated docs in \`${docsDir}/\`:`)
-  lines.push(`  - SPRINT-PLAN.md`)
-  lines.push(`  - STORIES.md`)
+  lines.push(`  - ai-artifacts/planning-artifacts/sprint-${slug}.md`)
+  if (updatedStatus) lines.push(`  - ai-artifacts/sprint-status.yaml (stories updated to in-progress)`)
 
   return lines.join("\n")
 }
