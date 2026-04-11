@@ -10,20 +10,18 @@ Do NOT proceed until the user provides both.
 
 ## Step 1 — Preview
 
-Call `workflow_feature` with `dry_run: true` using the name and description from: $ARGUMENTS
+Call `workflow_feature_preview` with the name and description from: $ARGUMENTS
 
-Show the full preview returned by the tool.
+Tell the user the preview files are ready and where to find them (ai-artifacts/.previews/feature-[slug]/).
+Ask them to open and review the files, and edit anything they want to change.
 
 ---
 
 **CHECKPOINT — Stop here.**
 
 Ask:
-1. Does the PRD correctly capture the feature?
-2. Any user stories to add, remove, or adjust?
-3. Does the architecture look correct?
-4. Any tasks to add, split, or remove?
-5. Anything to adjust before saving?
+1. Have you reviewed the preview files?
+2. Anything to edit before saving?
 
 Wait for explicit confirmation before proceeding.
 
@@ -31,6 +29,6 @@ Wait for explicit confirmation before proceeding.
 
 ## Step 2 — Save
 
-Call `workflow_feature` again with the same args but `dry_run: false`.
+Call `workflow_feature_save` with the same arguments.
 
 Confirm which files were written and suggest which agent to use to start implementation.

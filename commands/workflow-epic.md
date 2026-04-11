@@ -11,19 +11,18 @@ Do NOT proceed until the user provides all three.
 
 ## Step 1 — Preview
 
-Call `workflow_epic` with `dry_run: true` using the name, goal, and priority from: $ARGUMENTS
+Call `workflow_epic_preview` with the name, goal, and priority from: $ARGUMENTS
 
-Show the full preview returned by the tool.
+Tell the user the preview files are ready and where to find them (ai-artifacts/.previews/epic-[slug]/).
+Ask them to open and review the files, and edit anything they want to change.
 
 ---
 
 **CHECKPOINT — Stop here.**
 
 Ask:
-1. Does the epic scope look correct?
-2. Any features to add or remove?
-3. Does the effort estimate reasoning make sense?
-4. Anything to adjust before saving?
+1. Have you reviewed the preview files?
+2. Anything to edit before saving?
 
 Wait for explicit confirmation before proceeding.
 
@@ -31,6 +30,6 @@ Wait for explicit confirmation before proceeding.
 
 ## Step 2 — Save
 
-Call `workflow_epic` again with the same args but `dry_run: false`.
+Call `workflow_epic_save` with the same arguments.
 
-Confirm which files were written and suggest running `/workflow-feature [feature name]` for each feature to implement.
+Confirm which files were written and suggest running `/workflow-feature` for each feature to implement.

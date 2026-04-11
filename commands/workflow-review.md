@@ -5,20 +5,18 @@ agent: analyst
 
 ## Step 1 — Preview
 
-Call `workflow_review` with `dry_run: true`.
+Call `workflow_review_preview` with scope: $ARGUMENTS (use current git diff if empty)
 
-Scope: $ARGUMENTS (use current git diff if empty)
-
-Show the full preview returned by the tool.
+Tell the user the preview files are ready and where to find them (ai-artifacts/.previews/review-[slug]/).
+Ask them to open, review, and annotate anything they want to adjust.
 
 ---
 
 **CHECKPOINT — Stop here.**
 
 Ask:
-1. Do the findings look accurate?
-2. Any severity levels to adjust?
-3. Anything to refine before saving?
+1. Have you reviewed the preview files?
+2. Any severity levels or findings to adjust?
 
 Wait for explicit confirmation before proceeding.
 
@@ -26,6 +24,6 @@ Wait for explicit confirmation before proceeding.
 
 ## Step 2 — Save
 
-Call `workflow_review` again with the same args but `dry_run: false`.
+Call `workflow_review_save` with the same arguments.
 
 Display the verdict and list CRITICAL/HIGH issues to the user.
