@@ -1,40 +1,80 @@
 # opencode-bmad-workflow
 
-A [BMAD](https://github.com/bmad-dev/bmad-method) workflow plugin for [opencode](https://opencode.ai) that automates product and engineering workflows using specialized AI agents.
+A [BMAD](https://github.com/bmad-dev/bmad-method) workflow plugin for [opencode](https://opencode.ai) that brings structured product and engineering workflows into your AI coding sessions.
 
 ## What it does
 
-Brings structured BMAD methodology into opencode through 5 automated workflows:
+Automates the full BMAD development cycle through slash commands and tool calls:
 
-| Workflow | Agent chain | Artifacts | Living docs |
-|----------|-------------|-----------|-------------|
-| `workflow_epics` | Analyst | _(read-only)_ | — |
-| `workflow_epic` | PM | `ai-artifacts/epics/[epic].md` | `docs/OVERVIEW.md` |
-| `workflow_feature` | PM → Architect → PM | `ai-artifacts/[feature]/` | `docs/ARCHITECTURE.md`, `docs/features/[feature].md` |
-| `workflow_sprint` | PM → PM | `ai-artifacts/sprint-[date]/` | — |
-| `workflow_review` | Analyst → Reviewer | `ai-artifacts/review-[date]/` | — |
+```
+/workflow-epic        → define epics (scope, goal, priority)
+/workflow-story       → create BMAD stories (user story + AC + tasks + dev notes)
+/workflow-story-dev   → dev agent implements story tasks directly in your project
+/workflow-story-update → advance story status (ready-for-dev → in-progress → review → done)
+/workflow-sprint      → plan a sprint from your ready-for-dev backlog
+/workflow-review      → adversarial code review before merging
+/workflow-status      → see all epics and stories at a glance
+```
 
-Two output types:
-- **`ai-artifacts/`** — workflow artifacts (temporary, can be gitignored)
-- **`docs/`** — living project documentation, updated automatically, meant to be versioned with the code
+### Story lifecycle
 
-Two invocation modes:
-- **Plugin tools** (`workflow_*`) — fully automated, no interruptions
-- **Slash commands** (`/workflow-*`) — semi-interactive, agents may ask for clarification
+```
+ready-for-dev → in-progress → review → done
+                                     ↘ superseded / deferred
+```
 
-> **Note on local models:** Local models tend to skip checkpoints and generate directly. Always pass arguments explicitly to avoid hallucinations (see Usage below).
+All tracked in a central `ai-artifacts/sprint-status.yaml` that evolves automatically throughout the project.
+
+### Output structure
+
+```
+ai-artifacts/
+  sprint-status.yaml                          ← central tracking file (living)
+  planning-artifacts/
+    epic-1-[slug].md                          ← epic definition
+    sprint-[slug].md                          ← sprint plan
+    review-[slug]/ANALYSIS.md, REVIEW.md      ← code review
+  implementation-artifacts/
+    stories/1-1-[slug].md                     ← BMAD story (status + AC + tasks + dev notes)
+
+docs/
+  OVERVIEW.md                                 ← project overview (auto-created once)
+  ROADMAP.md                                  ← epic roadmap (auto-updated)
+```
+
+### Preview / save pattern
+
+Every workflow that generates documents uses a two-step pattern:
+
+1. `_preview` — generates files into `ai-artifacts/.previews/` for you to read and edit freely
+2. `_save` — reads your (possibly edited) preview and writes to final locations
+
+This means you always review and can modify AI output before anything is committed.
+
+---
 
 ## Requirements
 
 - [opencode](https://opencode.ai) 1.4.x or later
-- [Bun](https://bun.sh) or Node.js (for dependency installation)
-- Any model provider supported by opencode (Ollama, Anthropic, OpenAI, Google…)
+- [Bun](https://bun.sh) (recommended) or Node.js
+- Any model supported by opencode (Anthropic, OpenAI, Google, Ollama…)
 
-> **Important:** The model assigned to each agent must support tool calling. Models like `deepseek-r1` do not support tools and will fail in workflow sub-sessions.
+> **Model requirement:** Agents run in child sessions and require a model that supports tool calling. Models like `deepseek-r1` do not support tools and will fail silently.
+
+---
 
 ## Installation
 
-1. Copy the files into your opencode config directory (`~/.config/opencode/` on macOS/Linux):
+> **Note:** This plugin is installed by copying files — there is no npm package yet.
+
+### 1. Clone into your opencode config directory
+
+```bash
+cd ~/.config/opencode
+git clone https://github.com/Alex-stack-cell/opencode-bmad-workflow.git .
+```
+
+Or copy manually:
 
 ```
 agents/     → ~/.config/opencode/agents/
@@ -42,14 +82,14 @@ commands/   → ~/.config/opencode/commands/
 plugins/    → ~/.config/opencode/plugins/
 ```
 
-2. Install dependencies:
+### 2. Install dependencies
 
 ```bash
 cd ~/.config/opencode
 bun install
 ```
 
-3. Register the plugin in your `opencode.json`:
+### 3. Register the plugin in `opencode.json`
 
 ```json
 {
@@ -57,106 +97,120 @@ bun install
 }
 ```
 
-4. Restart opencode.
+### 4. Restart opencode
+
+---
 
 ## Usage
+
+### Recommended cycle
+
+Follow this order to avoid hallucinations and respect the BMAD workflow:
+
+```
+1. /workflow-setup      → set language (fr, en, es…)
+2. /workflow-epic       → define your first epic
+3. /workflow-story      → create stories for that epic (repeat)
+4. /workflow-status     → verify stories are ready-for-dev
+5. /workflow-sprint     → plan your sprint
+6. /workflow-story-dev  → implement a story (repeat per story)
+7. /workflow-story-update → mark as review, then done
+8. /workflow-review     → run code review before closing
+```
+
+> `/workflow-sprint` will warn you if no `ready-for-dev` stories exist yet.
 
 ### Start here
 
 ```
-workflow_init
+/workflow-init
 ```
 
-Shows all available workflows and recommends where to start.
+Lists all available workflows with their agent chains and output paths.
 
-### Recommended flow
+### Passing arguments directly
 
-```
-workflow_epics      → see your roadmap
-workflow_epic       → define a new epic (updates docs/OVERVIEW.md)
-workflow_feature    → implement a feature (updates docs/ARCHITECTURE.md + docs/features/)
-workflow_sprint     → plan a sprint
-workflow_review     → review code before merging
-```
-
-### Always pass arguments explicitly
-
-To avoid hallucinations with local models, always provide arguments directly:
+To avoid hallucinations with local models, pass arguments inline:
 
 ```
-/workflow-epic WCAG Compliance - Ensure tabs and multi form steps are WCAG compliant
-/workflow-feature Tab accessibility - Fix keyboard navigation and ARIA attributes
-/workflow-sprint WCAG compliance sprint - Fix tabs and multi form steps, 2 weeks
-/workflow-review src/components/tabs
+/workflow-epic Design System — Build a reusable component library
+/workflow-story Button component — As a developer, I want a Button component with variants
+/workflow-sprint Sprint 1 — Ship the Button and Input components, 1 week
+/workflow-review src/components/Button
 ```
 
-Without arguments, local models may invent content instead of asking the user.
+Without arguments, the slash command will ask interactively.
+
+---
 
 ## Configuring models
 
-Agents do not ship with a hardcoded model — they use the default model configured in your `opencode.json`. To assign a specific model per agent, add a `model:` field in the agent's frontmatter:
+Agents inherit the default model from `opencode.json`. To assign a model per agent, add a `model:` field in the agent's frontmatter:
 
 ```yaml
 ---
-description: ...
+description: Product manager agent
 mode: subagent
-model: anthropic/claude-sonnet-4-5   # Anthropic
-# model: openai/gpt-4o               # OpenAI
-# model: google/gemini-2.5-flash     # Google
-# model: ollama/qwen3-coder:30b      # Ollama
+model: anthropic/claude-sonnet-4-6
+# model: openai/gpt-4o
+# model: google/gemini-2.5-flash
+# model: ollama/qwen3-coder:30b
 ---
 ```
 
-This keeps the plugin model-agnostic by default while allowing per-agent overrides.
+---
 
 ## Project structure
 
 ```
 agents/
-  analyst.md          # Code analysis agent (read-only)
-  architect.md        # Architecture design agent (read-only)
-  frontend.md         # Frontend implementation agent
-  pm.md               # Product manager agent (read-only)
-  reviewer.md         # Code review agent (read-only)
-  python.md           # Python implementation agent
-  php-laravel.md      # PHP/Laravel implementation agent
+  analyst.md          # Read-only analysis
+  architect.md        # Architecture and tasks
+  dev.md              # Implementation (has full tool access)
+  pm.md               # Product manager — stories, epics, roadmap
+  reviewer.md         # Adversarial code review
 
 commands/
-  workflow-init.md    # Interactive entry point
-  workflow-epics.md   # Interactive roadmap overview
-  workflow-epic.md    # Interactive epic workflow
-  workflow-feature.md # Interactive feature workflow
-  workflow-sprint.md  # Interactive sprint planning
-  workflow-review.md  # Interactive code review
+  workflow-init.md
+  workflow-setup.md
+  workflow-status.md
+  workflow-epic.md
+  workflow-story.md
+  workflow-story-update.md
+  workflow-story-dev.md
+  workflow-sprint.md
+  workflow-review.md
 
 plugins/
-  index.ts            # Plugin entry point — registers all tools
+  index.ts                    # Registers all tools
+  types/
+    workflow.ts               # WorkflowCtx, WorkflowRunCtx, WorkflowConfig
   utils/
-    types.ts          # Shared contracts: WorkflowCtx, WorkflowRunCtx
-    session.ts        # Session resolution, withSession(), runAgentSession()
-    files.ts          # writeDoc(), readDoc(), timestamp(), formatDoc()
+    files.ts                  # readDoc, writeDoc, slugify
+    config.ts                 # Per-project language config (.workflow-config.json)
+    status.ts                 # sprint-status.yaml IO + story file helpers
+    session.ts                # withSession, runAgentSession, runDevAgentSession
   workflows/
-    epic.ts           # Epic workflows (overview + create)
-    feature.ts        # Feature workflow
-    sprint.ts         # Sprint planning workflow
-    review.ts         # Code review workflow
+    epic.ts                   # workflow_status, workflow_epic_preview/save
+    story.ts                  # workflow_story_preview/save
+    story-update.ts           # workflow_story_update (pure IO, no LLM)
+    story-dev.ts              # workflow_story_dev (dev agent with full tool access)
+    sprint.ts                 # workflow_sprint_preview/save
+    review.ts                 # workflow_review_preview/save
 ```
 
-### Architecture
+### Architecture principles
 
-Each workflow file owns its full slice:
-- **`meta`** — name, chain description, generated files (drives `workflow_init` output automatically)
-- **`createXTool(ctx)`** — tool factory, description and args schema colocated with the implementation
-- **`runXWorkflow(runCtx)`** — private implementation, typed via `WorkflowRunCtx`
+- **Orthogonal** — each file owns one responsibility. `status.ts` is the single owner of `sprint-status.yaml` and story files.
+- **DRY** — `slugify`, `readDoc`, `withSession` are defined once, used everywhere.
+- **KISS** — YAML manipulation is delegated to the LLM (no YAML parser dependency). ID extraction uses a JSON envelope `{id, yaml}` for reliability with a graceful fallback.
+- **Preview/save** — no file is written to its final location without the user reviewing it first.
 
-`index.ts` is a pure aggregator — adding a workflow = one new file + one line in `index.ts`.
+Two agent execution modes:
+- **`runAgentSession`** — direct text output only, no tools. Used for PM/architect/analyst agents generating documents.
+- **`runDevAgentSession`** — full tool access. Used only by `workflow_story_dev` so the dev agent can read and write project files.
 
-Key utilities:
-- **`WorkflowCtx`** — `{ client, directory }` provided by OpenCode to each tool
-- **`WorkflowRunCtx`** — `WorkflowCtx & { sessionId }` — resolved context passed to internal functions
-- **`withSession(ctx, fn)`** — resolves the sessionId then calls `fn(runCtx)`, eliminating boilerplate across all tools
-- **`runAgentSession(runCtx, agent, prompt)`** — creates a child session, disables workflow tools to prevent recursion, waits for idle, returns the last assistant text
-- **`readDoc(dir, path)`** — reads an existing doc or returns `""` — used for upsert patterns in living docs
+---
 
 ## License
 
