@@ -3,7 +3,7 @@ import { runAgentSession, withSession } from "../utils/session.ts"
 import { writeDoc, readDoc, formatDoc } from "../utils/files.ts"
 import { readdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
-import type { WorkflowCtx, WorkflowRunCtx } from "../utils/types.ts"
+import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
 
 // ─── Metadata ─────────────────────────────────────────────────────────────────
 

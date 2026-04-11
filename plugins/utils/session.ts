@@ -1,5 +1,6 @@
 import type { OpencodeClient } from "@opencode-ai/sdk"
-import type { WorkflowCtx, WorkflowRunCtx } from "./types.ts"
+import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
+import { loadConfig } from "./config.ts"
 
 // ─── Session resolution ───────────────────────────────────────────────────────
 
@@ -7,21 +8,23 @@ import type { WorkflowCtx, WorkflowRunCtx } from "./types.ts"
 export async function getCurrentSessionId(client: OpencodeClient, directory: string): Promise<string> {
   const res = await client.session.list({ query: { directory } })
   const sessions = (res.data ?? []) as Array<{ id: string; parentID?: string }>
-  const root = sessions.filter((s) => !s.parentID).at(-1) ?? sessions.at(-1)
+  const root = sessions.findLast((s) => !s.parentID) ?? sessions.at(-1)
   if (!root) throw new Error("No active session found")
   return root.id
 }
 
 /**
- * Resolves the sessionId then calls fn with a complete WorkflowRunCtx.
- * Removes the getCurrentSessionId boilerplate from every execute().
+ * Resolves the sessionId and loads project config, then calls fn with a complete WorkflowRunCtx.
  */
 export async function withSession<T>(
   ctx: WorkflowCtx,
   fn: (runCtx: WorkflowRunCtx) => Promise<T>,
 ): Promise<T> {
-  const sessionId = await getCurrentSessionId(ctx.client, ctx.directory)
-  return fn({ ...ctx, sessionId })
+  const [sessionId, config] = await Promise.all([
+    getCurrentSessionId(ctx.client, ctx.directory),
+    loadConfig(ctx.directory),
+  ])
+  return fn({ ...ctx, sessionId, config })
 }
 
 // ─── Agent execution ──────────────────────────────────────────────────────────
@@ -29,11 +32,6 @@ export async function withSession<T>(
 /**
  * Sends a prompt to a child session via a named agent.
  * Waits until the session is idle, then returns the last assistant text.
- *
- * @param runCtx - context holding client, directory, and parent sessionId
- * @param agentName - name of the OpenCode agent to invoke
- * @param prompt - prompt text to send
- * @returns last assistant text message, or "" if none
  */
 const DIRECT_OUTPUT_INSTRUCTION =
   "IMPORTANT: Respond with plain text only. Do NOT use any tools or function calls. Write the content directly.\n\n"
@@ -41,6 +39,7 @@ const DIRECT_OUTPUT_INSTRUCTION =
 /** Workflow tool names to disable in child sessions to prevent recursion. */
 const WORKFLOW_TOOLS_DISABLED: Record<string, boolean> = {
   workflow_init: false,
+  workflow_setup: false,
   workflow_epics: false,
   workflow_epic: false,
   workflow_feature: false,
@@ -48,12 +47,22 @@ const WORKFLOW_TOOLS_DISABLED: Record<string, boolean> = {
   workflow_review: false,
 }
 
+function getLanguageLabel(language: string): string {
+  return new Intl.DisplayNames(["en"], { type: "language" }).of(language) ?? language
+}
+
+function buildLanguageInstruction(language: string): string {
+  if (language === "en") return ""
+  const label = getLanguageLabel(language)
+  return `IMPORTANT: Write your entire response in ${label} (${language}). All headings, descriptions, labels, and content must be in ${label}.\n\n`
+}
+
 export async function runAgentSession(
   runCtx: WorkflowRunCtx,
   agentName: string,
   prompt: string,
 ): Promise<string> {
-  const { client, directory, sessionId: parentSessionId } = runCtx
+  const { client, directory, sessionId: parentSessionId, config } = runCtx
 
   const sessionRes = await client.session.create({
     body: { parentID: parentSessionId, title: `[workflow] ${agentName}` },
@@ -63,13 +72,14 @@ export async function runAgentSession(
   if (!session) throw new Error(`Failed to create session for agent "${agentName}"`)
 
   const sessionId = session.id
+  const languageInstruction = buildLanguageInstruction(config.language)
 
   await client.session.prompt({
     path: { id: sessionId },
     body: {
       agent: agentName,
       tools: WORKFLOW_TOOLS_DISABLED,
-      parts: [{ type: "text", text: DIRECT_OUTPUT_INSTRUCTION + prompt }],
+      parts: [{ type: "text", text: DIRECT_OUTPUT_INSTRUCTION + languageInstruction + prompt }],
     },
     query: { directory },
   })
@@ -106,10 +116,8 @@ async function waitForIdle(
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
     const res = await client.session.status({ query: { directory } })
-    // API returns { [sessionId]: SessionStatus }, not an array
     const statuses = (res.data ?? {}) as Record<string, { type: string }>
     const entry = statuses[sessionId]
-    // Session not found: completed and removed, or never started — stop waiting
     if (!entry) return
     if (entry.type === "idle") return
     await sleep(500)

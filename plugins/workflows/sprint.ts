@@ -1,7 +1,7 @@
 import { tool } from "@opencode-ai/plugin"
 import { runAgentSession, withSession } from "../utils/session.ts"
 import { writeDoc, timestamp, formatDoc } from "../utils/files.ts"
-import type { WorkflowCtx, WorkflowRunCtx } from "../utils/types.ts"
+import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
 
 // ─── Metadata ─────────────────────────────────────────────────────────────────
 
