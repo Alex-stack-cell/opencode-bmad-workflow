@@ -1,6 +1,6 @@
 import { tool } from "@opencode-ai/plugin"
 import { runAgentSession, withSession } from "../utils/session.ts"
-import { writeDoc, readDoc } from "../utils/files.ts"
+import { writeDoc, readDoc, slugify } from "../utils/files.ts"
 import { readSprintStatus, writeSprintStatus } from "../utils/status.ts"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
@@ -140,7 +140,7 @@ Format:
 
 async function runEpicPreview(args: EpicArgs): Promise<string> {
   const { epicName, directory } = args
-  const slug = epicName.toLowerCase().replaceAll(/\s+/g, "-").replaceAll(/[^a-z0-9-]/g, "")
+  const slug = slugify(epicName)
   const previewDir = `ai-artifacts/.previews/epic-${slug}`
 
   const { epicDef, overviewContent, updatedRoadmap, existingRoadmap } = await generateEpicContent(args)
@@ -168,7 +168,7 @@ async function runEpicPreview(args: EpicArgs): Promise<string> {
 
 async function runEpicSave(args: EpicArgs): Promise<string> {
   const { epicName, epicGoal, priority, directory, ...runCtx } = args
-  const slug = epicName.toLowerCase().replaceAll(/\s+/g, "-").replaceAll(/[^a-z0-9-]/g, "")
+  const slug = slugify(epicName)
   const previewDir = `ai-artifacts/.previews/epic-${slug}`
 
   const previewEpic = await readDoc(directory, `${previewDir}/epic.md`)
@@ -191,10 +191,10 @@ async function runEpicSave(args: EpicArgs): Promise<string> {
     updatedRoadmap = generated.updatedRoadmap
   }
 
-  // Update sprint-status.yaml — delegate yaml manipulation to LLM
+  // Update sprint-status.yaml — ask LLM to return JSON envelope {id, yaml} for reliable ID extraction
   const existingStatus = await readSprintStatus(directory)
-  const updatedStatus = await runAgentSession({ ...runCtx, directory }, "pm", `
-Update this sprint-status.yaml to add a new epic entry.
+  const raw = await runAgentSession({ ...runCtx, directory }, "pm", `
+Update this sprint-status.yaml to add a new epic entry, then return the result as JSON.
 
 ${existingStatus
     ? `Existing sprint-status.yaml:\n\`\`\`yaml\n${existingStatus}\n\`\`\`\n\nAdd the new epic below. Use the next available integer ID. Keep all existing entries intact.`
@@ -207,9 +207,10 @@ New epic to add:
 - status: planned
 - stories: []
 
-Output ONLY the raw YAML content, no markdown fences, no explanation.
+Respond with ONLY this JSON (no markdown, no explanation):
+{"id": <assigned integer id>, "yaml": "<full updated yaml as a single escaped string>"}
 
-Format (follow exactly):
+YAML format to follow:
 epics:
   - id: 1
     name: "Epic name"
@@ -218,14 +219,21 @@ epics:
     stories: []
 `.trim())
 
+  // Parse JSON envelope — fall back gracefully if LLM ignored the format
+  let epicId = "n"
+  let updatedStatus: string
+  try {
+    const parsed = JSON.parse(raw) as { id: number; yaml: string }
+    epicId = String(parsed.id)
+    updatedStatus = parsed.yaml
+  } catch {
+    // LLM returned raw YAML instead of JSON — use it as-is, ID stays "n"
+    updatedStatus = raw
+  }
+
   const lines: string[] = []
   lines.push(`# Workflow: Epic — ${epicName}`)
   if (hasPreview) lines.push(`> Loaded from preview (including any edits you made).\n`)
-
-  // Determine epic ID from updated status (for filename)
-  const epicIdLine = updatedStatus.split("\n").findIndex((l) => l.includes(`name: "${epicName}"`))
-  const epicIdRaw = epicIdLine > 0 ? updatedStatus.split("\n").slice(Math.max(0, epicIdLine - 2), epicIdLine).join("\n").match(/id:\s*(\d+)/)?.[1] : null
-  const epicId = epicIdRaw ?? "n"
 
   const epicFilePath = await writeDoc(directory, `ai-artifacts/planning-artifacts/epic-${epicId}-${slug}.md`, epicDef)
   lines.push(`   ✓ Epic written → ${epicFilePath}`)

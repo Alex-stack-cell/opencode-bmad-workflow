@@ -1,6 +1,6 @@
 import { tool } from "@opencode-ai/plugin"
 import { runAgentSession, withSession } from "../utils/session.ts"
-import { writeDoc, readDoc } from "../utils/files.ts"
+import { writeDoc, readDoc, slugify } from "../utils/files.ts"
 import { readSprintStatus, writeSprintStatus } from "../utils/status.ts"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
@@ -80,7 +80,7 @@ Include:
 
 async function runSprintPreview(args: SprintArgs): Promise<string> {
   const { sprintGoal, directory } = args
-  const slug = sprintGoal.toLowerCase().replaceAll(/\s+/g, "-").replaceAll(/[^a-z0-9-]/g, "")
+  const slug = slugify(sprintGoal)
   const previewDir = `ai-artifacts/.previews/sprint-${slug}`
 
   const { plan } = await generateSprintContent(args)
@@ -100,7 +100,7 @@ async function runSprintPreview(args: SprintArgs): Promise<string> {
 
 async function runSprintSave(args: SprintArgs): Promise<string> {
   const { sprintGoal, directory, ...runCtx } = args
-  const slug = sprintGoal.toLowerCase().replaceAll(/\s+/g, "-").replaceAll(/[^a-z0-9-]/g, "")
+  const slug = slugify(sprintGoal)
   const previewDir = `ai-artifacts/.previews/sprint-${slug}`
 
   const previewPlan = await readDoc(directory, `${previewDir}/sprint-plan.md`)

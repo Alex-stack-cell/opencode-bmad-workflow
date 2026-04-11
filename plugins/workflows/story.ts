@@ -1,6 +1,6 @@
 import { tool } from "@opencode-ai/plugin"
 import { runAgentSession, withSession } from "../utils/session.ts"
-import { writeDoc, readDoc } from "../utils/files.ts"
+import { writeDoc, readDoc, slugify } from "../utils/files.ts"
 import { readSprintStatus, writeSprintStatus } from "../utils/status.ts"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
@@ -104,7 +104,7 @@ Reference existing patterns from the codebase where applicable.
   return { userStory, tasks }
 }
 
-function buildStoryFile(epicId: number, storyId: string, title: string, userStory: string, tasks: string): string {
+function buildStoryFile(storyId: string, title: string, userStory: string, tasks: string): string {
   return [
     `# Story ${storyId}: ${title}`,
     ``,
@@ -119,12 +119,12 @@ function buildStoryFile(epicId: number, storyId: string, title: string, userStor
 
 async function runStoryPreview(args: StoryArgs): Promise<string> {
   const { epicId, storyTitle, directory } = args
-  const slug = storyTitle.toLowerCase().replaceAll(/\s+/g, "-").replaceAll(/[^a-z0-9-]/g, "")
+  const slug = slugify(storyTitle)
   const previewDir = `ai-artifacts/.previews/story-${epicId}-${slug}`
 
   const { userStory, tasks } = await generateStoryContent(args)
 
-  const storyContent = buildStoryFile(epicId, `${epicId}.?`, storyTitle, userStory, tasks)
+  const storyContent = buildStoryFile(`${epicId}.?`, storyTitle, userStory, tasks)
   await writeDoc(directory, `${previewDir}/story.md`, storyContent)
 
   return [
@@ -140,16 +140,16 @@ async function runStoryPreview(args: StoryArgs): Promise<string> {
 
 async function runStorySave(args: StoryArgs): Promise<string> {
   const { epicId, storyTitle, storyDescription, directory, ...runCtx } = args
-  const slug = storyTitle.toLowerCase().replaceAll(/\s+/g, "-").replaceAll(/[^a-z0-9-]/g, "")
+  const slug = slugify(storyTitle)
   const previewDir = `ai-artifacts/.previews/story-${epicId}-${slug}`
 
   const previewStory = await readDoc(directory, `${previewDir}/story.md`)
   const hasPreview = !!previewStory
 
-  // Update sprint-status.yaml to get the assigned story ID
+  // Update sprint-status.yaml — ask LLM to return JSON envelope {id, yaml} for reliable ID extraction
   const existingStatus = await readSprintStatus(directory)
-  const updatedStatus = await runAgentSession({ ...runCtx, directory }, "pm", `
-Update this sprint-status.yaml to add a new story to epic ID ${epicId}.
+  const raw = await runAgentSession({ ...runCtx, directory }, "pm", `
+Update this sprint-status.yaml to add a new story to epic ID ${epicId}, then return the result as JSON.
 
 ${existingStatus
     ? `Existing sprint-status.yaml:\n\`\`\`yaml\n${existingStatus}\n\`\`\`\n\nAdd the new story inside the stories list of epic with id: ${epicId}. Use the next available story number within that epic (e.g. if epic 1 already has stories 1.1 and 1.2, the new one is 1.3). Keep all existing entries intact.`
@@ -160,9 +160,10 @@ New story to add:
 - status: backlog
 - parent epic id: ${epicId}
 
-Output ONLY the raw YAML content, no markdown fences, no explanation.
+Respond with ONLY this JSON (no markdown, no explanation):
+{"id": "<assigned story id like 1.1>", "yaml": "<full updated yaml as a single escaped string>"}
 
-Format (follow exactly):
+YAML format to follow:
 epics:
   - id: 1
     name: "Epic name"
@@ -174,24 +175,28 @@ epics:
         status: backlog
 `.trim())
 
-  // Extract the assigned story ID from the updated yaml
-  const lines = updatedStatus.split("\n")
-  const titleLineIdx = lines.findIndex((l) => l.includes(`title: "${storyTitle}"`))
-  const storyIdRaw = titleLineIdx > 0
-    ? lines.slice(Math.max(0, titleLineIdx - 2), titleLineIdx).join("\n").match(/id:\s*"([^"]+)"/)?.[1]
-    : null
-  const storyId = storyIdRaw ?? `${epicId}.?`
-
-  let storyContent: string
-  if (hasPreview) {
-    // Replace the placeholder "epicId.?" with the real story ID
-    storyContent = previewStory.replace(`# Story ${epicId}.?: ${storyTitle}`, `# Story ${storyId}: ${storyTitle}`)
-  } else {
-    const { userStory, tasks } = await generateStoryContent({ ...runCtx, directory, epicId, storyTitle, storyDescription })
-    storyContent = buildStoryFile(epicId, storyId, storyTitle, userStory, tasks)
+  // Parse JSON envelope — fall back gracefully if LLM ignored the format
+  let storyId = `${epicId}.?`
+  let updatedStatus: string
+  try {
+    const parsed = JSON.parse(raw) as { id: string; yaml: string }
+    storyId = parsed.id
+    updatedStatus = parsed.yaml
+  } catch {
+    // LLM returned raw YAML instead of JSON — use it as-is, ID stays placeholder
+    updatedStatus = raw
   }
 
   const storyNum = storyId.includes(".") ? storyId.split(".")[1] : "?"
+
+  let storyContent: string
+  if (hasPreview) {
+    storyContent = previewStory.replace(`# Story ${epicId}.?: ${storyTitle}`, `# Story ${storyId}: ${storyTitle}`)
+  } else {
+    const { userStory, tasks } = await generateStoryContent({ ...runCtx, directory, epicId, storyTitle, storyDescription })
+    storyContent = buildStoryFile(storyId, storyTitle, userStory, tasks)
+  }
+
   const storyFilePath = await writeDoc(
     directory,
     `ai-artifacts/implementation-artifacts/stories/${epicId}-${storyNum}-${slug}.md`,
@@ -204,7 +209,7 @@ epics:
     await rm(join(directory, previewDir), { recursive: true, force: true })
   }
 
-  const resultLines = [
+  return [
     `# Workflow: Story — ${storyTitle}`,
     hasPreview ? `> Loaded from preview (including any edits you made).\n` : "",
     `   ✓ Story written → ${storyFilePath}`,
@@ -216,7 +221,5 @@ epics:
     `  - ai-artifacts/sprint-status.yaml`,
     ``,
     `Run \`workflow_sprint_preview\` when you're ready to plan the next sprint.`,
-  ].filter(Boolean)
-
-  return resultLines.join("\n")
+  ].filter(Boolean).join("\n")
 }

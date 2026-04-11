@@ -1,6 +1,6 @@
 import { tool } from "@opencode-ai/plugin"
 import { runAgentSession, withSession } from "../utils/session.ts"
-import { writeDoc, readDoc } from "../utils/files.ts"
+import { writeDoc, readDoc, slugify } from "../utils/files.ts"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
@@ -87,7 +87,7 @@ Format the report with:
 async function runReviewPreview(args: ReviewArgs): Promise<string> {
   const { scope, directory } = args
   const scopeLabel = scope ?? "full diff"
-  const slug = (scope ?? "full-diff").toLowerCase().replaceAll(/[^a-z0-9]/g, "-").replaceAll(/-+/g, "-")
+  const slug = slugify(scope ?? "full-diff")
   const previewDir = `ai-artifacts/.previews/review-${slug}`
 
   const { analysis, review } = await generateReviewContent(args)
@@ -109,7 +109,7 @@ async function runReviewPreview(args: ReviewArgs): Promise<string> {
 async function runReviewSave(args: ReviewArgs): Promise<string> {
   const { scope, directory } = args
   const scopeLabel = scope ?? "full diff"
-  const slug = (scope ?? "full-diff").toLowerCase().replaceAll(/[^a-z0-9]/g, "-").replaceAll(/-+/g, "-")
+  const slug = slugify(scope ?? "full-diff")
   const previewDir = `ai-artifacts/.previews/review-${slug}`
   const docsDir = `ai-artifacts/planning-artifacts/review-${slug}`
 
