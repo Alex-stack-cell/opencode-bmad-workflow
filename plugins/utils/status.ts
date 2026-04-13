@@ -98,3 +98,29 @@ export async function writeStoryFile(projectDir: string, storyId: string, conten
 export function allTasksDone(storyContent: string): boolean {
   return !storyContent.includes("- [ ]")
 }
+
+/**
+ * Returns top-level unchecked task descriptions from a story file.
+ * Top-level tasks are lines matching `^- [ ]` (no leading whitespace).
+ */
+export function parseUncheckedTopLevelTasks(content: string): string[] {
+  return content
+    .split("\n")
+    .filter((line) => /^- \[ \]/.test(line))
+    .map((line) => line.replace(/^- \[ \]\s*/, "").trim())
+    .filter(Boolean)
+}
+
+const PROGRESS_FILE = "ai-artifacts/.dev-progress.md"
+
+/** Writes a live progress file so the user can track dev session state. */
+export async function writeProgressFile(projectDir: string, content: string): Promise<void> {
+  const path = join(projectDir, PROGRESS_FILE)
+  await writeFile(path, content, "utf-8").catch(() => {})
+}
+
+/** Clears the progress file after a dev session completes. */
+export async function clearProgressFile(projectDir: string): Promise<void> {
+  const path = join(projectDir, PROGRESS_FILE)
+  await writeFile(path, "", "utf-8").catch(() => {})
+}

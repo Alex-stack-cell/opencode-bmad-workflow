@@ -7,6 +7,9 @@ import {
   readStoryFile,
   writeStoryFile,
   allTasksDone,
+  parseUncheckedTopLevelTasks,
+  writeProgressFile,
+  clearProgressFile,
 } from "../utils/status.ts"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
 
@@ -62,39 +65,83 @@ async function runStoryDev(args: StoryDevArgs): Promise<string> {
     if (patched !== yaml) await writeSprintStatus(directory, patched)
   }
 
-  // Run dev agent — full tool access so it can read/write project files
-  const summary = await runDevAgentSession({ ...runCtx, directory }, "dev", `
-You are implementing a BMAD user story. Your job is to implement all remaining unchecked tasks in the story below, then update the story file to reflect your work.
+  // Parse top-level unchecked tasks upfront so we can loop task by task
+  const tasks = parseUncheckedTopLevelTasks(storyContent)
+  const taskSummaries: string[] = []
 
-## Story to implement
+  if (tasks.length === 0) {
+    return [
+      `# Story ${storyId} — No unchecked tasks found`,
+      ``,
+      `Use \`workflow_story_update\` to mark this story as \`review\` or \`done\`.`,
+    ].join("\n")
+  }
 
-${storyContent}
+  // Implement each task in its own focused session
+  for (let i = 0; i < tasks.length; i++) {
+    const task = tasks[i]
+
+    // Write progress file so the user can track state by opening the file
+    await writeProgressFile(
+      directory,
+      [
+        `# Dev Progress — Story ${storyId}`,
+        ``,
+        `**Task ${i + 1} / ${tasks.length}** — en cours`,
+        ``,
+        `> ${task}`,
+        ``,
+        `## Tâches complétées`,
+        ...taskSummaries.map((s, idx) => `- [x] Tâche ${idx + 1}: ${tasks[idx]}`),
+        ``,
+        `## En attente`,
+        ...tasks.slice(i).map((t, idx) => `- [ ] Tâche ${i + idx + 1}: ${t}`),
+      ].join("\n"),
+    )
+
+    // Re-read the story to get updated checkboxes from previous iteration
+    const currentStory = (await readStoryFile(directory, storyId)) || storyContent
+
+    const summary = await runDevAgentSession({ ...runCtx, directory }, "dev", `
+You are implementing a BMAD user story. Implement ONLY the single task described below — do not implement other tasks.
+
+## Task to implement (task ${i + 1} of ${tasks.length})
+
+${task}
+
+## Full story context (for AC, dev notes, and patterns — do NOT implement other tasks)
+
+${currentStory}
 
 ## Instructions
 
-1. Read the story carefully: understand the user story, acceptance criteria, tasks, and dev notes.
-2. Implement ALL unchecked tasks (marked \`- [ ]\`) one by one, including their subtasks.
-3. For each task you complete, mark it as done in the story file: change \`- [ ]\` to \`- [x]\`.
-4. After implementing all tasks, validate each acceptance criterion by reviewing your implementation.
-5. Update the \`## Dev Agent Record\` section at the bottom of the story file:
-   - **Agent Model Used**: fill in your model name
-   - **Completion Notes**: brief summary of what was done, any decisions made, issues encountered
-   - **Files Modified**: list every file you created or modified
+1. Read the task and the story context carefully.
+2. Implement this task only, including any subtasks listed under it.
+3. Mark this task as done in the story file: change \`- [ ]\` to \`- [x]\`.
+4. If this is the last task, also update the \`## Dev Agent Record\` section:
+   - **Agent Model Used**: your model name
+   - **Completion Notes**: brief summary, decisions, limitations
+   - **Files Modified**: every file created or modified across all tasks
+5. Follow existing codebase patterns strictly. Write tests for your implementation.
 
-Follow the dev notes and existing codebase patterns strictly. Write tests for your implementation.
-
-When done, summarize what you implemented and list the files you modified.
+When done, write 2–3 sentences summarizing what you implemented for this task.
 `.trim())
 
-  // Re-read story to check if all tasks are now done
+    taskSummaries.push(summary)
+  }
+
+  // Clear progress file — session complete
+  await clearProgressFile(directory)
+
+  // Re-read story to check final state
   const updatedContent = await readStoryFile(directory, storyId)
   const isDone = updatedContent ? allTasksDone(updatedContent) : false
 
   const lines = [
     `# Workflow: Story Dev — ${storyId}`,
     ``,
-    `## Implementation Summary`,
-    summary,
+    `## Implementation Summary (${tasks.length} tasks)`,
+    ...taskSummaries.map((s, i) => [``, `### Task ${i + 1}: ${tasks[i]}`, s].join("\n")),
     ``,
     `## Status`,
   ]

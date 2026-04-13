@@ -6,6 +6,7 @@ import { createStoryUpdateTool, meta as storyUpdateMeta } from "./workflows/stor
 import { createStoryDevTool, meta as storyDevMeta } from "./workflows/story-dev.ts"
 import { createSprintPreviewTool, createSprintSaveTool, meta as sprintMeta } from "./workflows/sprint.ts"
 import { createReviewPreviewTool, createReviewSaveTool, meta as reviewMeta } from "./workflows/review.ts"
+import { createTaskTool, meta as taskMeta } from "./workflows/task.ts"
 import { loadConfig, saveConfig } from "./utils/config.ts"
 import type { WorkflowConfig } from "./types/workflow.ts"
 
@@ -16,7 +17,7 @@ type PluginCtx = {
   project: { root: string }
 }
 
-const allMeta = [metaStatus, epicMeta, storyMeta, storyUpdateMeta, storyDevMeta, sprintMeta, reviewMeta]
+const allMeta = [metaStatus, epicMeta, storyMeta, storyUpdateMeta, storyDevMeta, sprintMeta, reviewMeta, taskMeta]
 
 const SUPPORTED_LANGUAGES = ["en", "fr", "es", "de", "pt", "it", "ja", "zh"] as const
 
@@ -33,6 +34,7 @@ function buildInitText(config: WorkflowConfig): string {
     "4. /workflow-status        → verify stories appear as ready-for-dev",
     "5. /workflow-sprint        → plan a sprint from your backlog                [once per sprint]",
     "6. /workflow-story-dev     → dev agent implements the story                 [repeat per story]",
+    "   /workflow-task          → quick fix without epic/story (CSS, bug, tweak) [shortcut]",
     "7. /workflow-story-update  → mark as review, then done                      [repeat per story]",
     "8. /workflow-review        → adversarial code review before closing          [optional]",
     "```",
@@ -98,6 +100,7 @@ async function WorkflowPlugin(ctx: PluginCtx) {
       workflow_sprint_save: createSprintSaveTool(wfCtx),
       workflow_review_preview: createReviewPreviewTool(wfCtx),
       workflow_review_save: createReviewSaveTool(wfCtx),
+      workflow_task: createTaskTool(wfCtx),
     },
   }
 }

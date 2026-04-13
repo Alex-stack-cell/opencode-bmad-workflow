@@ -79,7 +79,11 @@ As a [user type], I want [goal], so that [benefit].
 2. Given [context], when [action], then [outcome].
 (add as many as needed)
 
-Include realistic, testable acceptance criteria based on the description.
+Calibrate to the actual scope:
+- A simple CSS fix or minor UI tweak → 2 AC max, no redundant cases
+- A full feature → as many AC as genuinely needed
+Do NOT repeat AC that test the same thing with trivial variations (e.g. "single panel" vs "multiple panels" for the same CSS rule).
+Include only realistic, testable acceptance criteria.
 `.trim())
 
   const tasks = await runAgentSession({ ...runCtx, directory }, "architect", `
@@ -99,6 +103,11 @@ Output ONLY in this exact format (no extra commentary):
 ## Dev Notes
 Key technical decisions, constraints, and implementation hints relevant to this story.
 Reference existing patterns from the codebase where applicable.
+
+Calibrate to the actual scope:
+- A simple CSS fix → 2-3 tasks max, no verification task if the fix is trivial
+- A full feature → as many tasks as needed
+Do NOT add tasks that are obvious or redundant (e.g. "verify in Figma" when the fix value was already specified by the user).
 `.trim())
 
   return { userStory, tasks }
