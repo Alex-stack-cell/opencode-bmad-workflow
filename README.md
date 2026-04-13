@@ -1,6 +1,6 @@
 # opencode-bmad-workflow
 
-A [BMAD](https://github.com/bmad-dev/bmad-method) workflow plugin for [opencode](https://opencode.ai) that brings structured product and engineering workflows into your AI coding sessions.
+A [BMAD](https://github.com/bmad-code-org/BMAD-METHOD) workflow plugin for [opencode](https://opencode.ai) that brings structured product and engineering workflows into your AI coding sessions.
 
 ## What it does
 
@@ -65,28 +65,28 @@ This means you always review and can modify AI output before anything is committ
 
 ## Installation
 
-> **Note:** This plugin is installed by copying files — there is no npm package yet.
-
-### 1. Clone the repo and run the installer
+### 1. Run the installer
 
 ```bash
-git clone https://github.com/Alex-stack-cell/opencode-bmad-workflow.git
-cd opencode-bmad-workflow
-./install.sh
+npx opencode-bmad-workflow
 ```
 
-The script:
+The installer:
 - Copies `agents/`, `commands/`, `plugins/` to `~/.config/opencode/`
-- Runs `bun install` (or `npm install`) for dependencies
+- Installs dependencies
 - Patches `opencode.json` to register the plugin
 - Warns about any missing agent files
 
-> **Already have an opencode config directory?** The installer copies files into `~/.config/opencode/` by default. Your existing config is preserved — only the plugin files are added.
+Already installed? Run with `--force` to reinstall:
+
+```bash
+npx opencode-bmad-workflow --force
+```
 
 To install into a custom opencode config directory:
 
 ```bash
-OPENCODE_CONFIG_DIR=/path/to/your/opencode/config ./install.sh
+OPENCODE_CONFIG_DIR=/path/to/your/opencode/config npx opencode-bmad-workflow
 ```
 
 ### 2. Restart opencode
