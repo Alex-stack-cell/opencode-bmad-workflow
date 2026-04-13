@@ -190,5 +190,10 @@ Output ONLY the raw YAML content, no markdown fences, no explanation.
   lines.push(`  - ai-artifacts/planning-artifacts/sprint-${slug}.md`)
   if (updatedStatus) lines.push(`  - ai-artifacts/sprint-status.yaml (stories updated to in-progress)`)
 
+  lines.push(`\n## Next steps`)
+  lines.push(`  1. \`/workflow-story-dev\` — dev agent implements a story (pass the story ID, e.g. "1.1")`)
+  lines.push(`  2. \`/workflow-story-update\` — move a story to review, then done`)
+  lines.push(`  3. \`/workflow-review\` — adversarial code review before closing`)
+
   return lines.join("\n")
 }
