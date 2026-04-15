@@ -7,13 +7,15 @@ A [BMAD](https://github.com/bmad-code-org/BMAD-METHOD) workflow plugin for [open
 Automates the full BMAD development cycle through slash commands and tool calls:
 
 ```
-/workflow-epic        → define epics (scope, goal, priority)
-/workflow-story       → create BMAD stories (user story + AC + tasks + dev notes)
-/workflow-story-dev   → dev agent implements story tasks directly in your project
-/workflow-story-update → advance story status (ready-for-dev → in-progress → review → done)
-/workflow-sprint      → plan a sprint from your ready-for-dev backlog
-/workflow-review      → adversarial code review before merging
-/workflow-status      → see all epics and stories at a glance
+/workflow-epic          → define epics (scope, goal, priority)
+/workflow-story         → create BMAD stories (user story + AC + tasks + dev notes)
+/workflow-story-tasks   → list all tasks in a story with index and status
+/workflow-story-task    → implement one task at a time (safer, interruptible)
+/workflow-story-dev     → implement all story tasks in one shot (legacy)
+/workflow-story-update  → advance story status (ready-for-dev → in-progress → review → done)
+/workflow-sprint        → plan a sprint from your ready-for-dev backlog
+/workflow-review        → adversarial code review before merging
+/workflow-status        → see all epics and stories at a glance
 ```
 
 ### Story lifecycle
@@ -100,14 +102,16 @@ OPENCODE_CONFIG_DIR=/path/to/your/opencode/config npx opencode-bmad-workflow
 Follow this order to avoid hallucinations and respect the BMAD workflow:
 
 ```
-1. /workflow-setup      → set language (fr, en, es…)
-2. /workflow-epic       → define your first epic
-3. /workflow-story      → create stories for that epic (repeat)
-4. /workflow-status     → verify stories are ready-for-dev
-5. /workflow-sprint     → plan your sprint
-6. /workflow-story-dev  → implement a story (repeat per story)
-7. /workflow-story-update → mark as review, then done
-8. /workflow-review     → run code review before closing
+1. /workflow-setup         → set language (fr, en, es…)
+2. /workflow-epic          → define your first epic
+3. /workflow-story         → create stories for that epic (repeat)
+4. /workflow-status        → verify stories are ready-for-dev
+5. /workflow-sprint        → plan your sprint
+6. /workflow-story-tasks   → list tasks in a story with index and status
+   /workflow-story-task    → implement one task at a time (recommended)
+   /workflow-story-dev     → implement all tasks in one shot (legacy, less control)
+7. /workflow-story-update  → mark as review, then done
+8. /workflow-review        → run code review before closing
 ```
 
 > `/workflow-sprint` will warn you if no `ready-for-dev` stories exist yet.
@@ -168,6 +172,8 @@ commands/
   workflow-status.md
   workflow-epic.md
   workflow-story.md
+  workflow-story-tasks.md
+  workflow-story-task.md
   workflow-story-update.md
   workflow-story-dev.md
   workflow-sprint.md
@@ -177,6 +183,7 @@ plugins/
   index.ts                    # Registers all tools
   types/
     workflow.ts               # WorkflowCtx, WorkflowRunCtx, WorkflowConfig
+    task.ts                   # Task
   utils/
     files.ts                  # readDoc, writeDoc, slugify
     config.ts                 # Per-project language config (.workflow-config.json)
@@ -186,7 +193,8 @@ plugins/
     epic.ts                   # workflow_status, workflow_epic_preview/save
     story.ts                  # workflow_story_preview/save
     story-update.ts           # workflow_story_update (pure IO, no LLM)
-    story-dev.ts              # workflow_story_dev (dev agent with full tool access)
+    story-dev.ts              # workflow_story_dev (all tasks in one shot)
+    story-task.ts             # workflow_story_tasks (list) + workflow_story_task (one at a time)
     sprint.ts                 # workflow_sprint_preview/save
     review.ts                 # workflow_review_preview/save
 ```
@@ -200,7 +208,11 @@ plugins/
 
 Two agent execution modes:
 - **`runAgentSession`** — direct text output only, no tools. Used for PM/architect/analyst agents generating documents.
-- **`runDevAgentSession`** — full tool access. Used only by `workflow_story_dev` so the dev agent can read and write project files.
+- **`runDevAgentSession`** — full tool access. Used by `workflow_story_dev` and `workflow_story_task` so the dev agent can read and write project files.
+
+### workflow_story_task vs workflow_story_dev
+
+`workflow_story_task` is the recommended way to implement stories. It runs one task per invocation — you validate the result before continuing. `workflow_story_dev` runs all tasks in sequence in child sessions, which is harder to interrupt and less transparent.
 
 ---
 
