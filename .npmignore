@@ -1,18 +1,6 @@
-# Dev / IDE
-.idea/
-.vscode/
-.claude/
-.gitignore
-
-# Source (dist/ is what gets used)
-plugins/
 node_modules/
 bun.lock
 package-lock.json
-
-# Shell installer (replaced by install.js)
-install.sh
-
-# Unused tsconfig (root one is for IDE only)
-tsconfig.json
+opencode.json
 plugins/tsconfig.json
+.idea/
