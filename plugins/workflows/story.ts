@@ -156,6 +156,75 @@ async function runStoryPreview(args: StoryArgs): Promise<string> {
   ].join("\n")
 }
 
+/**
+ * Parses sprint-status.yaml (as raw text) and returns the next available story
+ * number for the given epic. Deterministic — never delegates to the LLM.
+ */
+function computeNextStoryNum(yaml: string, epicId: number): number {
+  if (!yaml) return 1
+  const prefix = `${epicId}.`
+  const nums = [...yaml.matchAll(/id:\s*"(\d+)\.(\d+)"/g)]
+    .filter(([, eId]) => Number(eId) === epicId)
+    .map(([, , sNum]) => Number(sNum))
+  return nums.length > 0 ? Math.max(...nums) + 1 : 1
+}
+
+/**
+ * Appends a new story entry to the stories list of the target epic in the raw
+ * sprint-status.yaml string. Deterministic — never delegates to the LLM.
+ */
+function appendStoryToYaml(yaml: string, epicId: number, storyId: string, title: string, slug: string): string {
+  const newEntry = [
+    `      - id: "${storyId}"`,
+    `        title: "${title}"`,
+    `        status: ready-for-dev`,
+    `        parent: ${epicId}`,
+    `        file: implementation-artifacts/stories/${epicId}-${storyId.split(".")[1]}-${slug}.md`,
+  ].join("\n")
+
+  if (!yaml) {
+    return [
+      `epics:`,
+      `  - id: ${epicId}`,
+      `    name: ""`,
+      `    status: planned`,
+      `    priority: HIGH`,
+      `    goal: ""`,
+      `    stories:`,
+      newEntry,
+    ].join("\n") + "\n"
+  }
+
+  // Insert after the last story entry of the target epic, or after the epic's `stories:` line
+  const lines = yaml.split("\n")
+  let inTargetEpic = false
+  let lastStoryLineIdx = -1
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (/^\s*-\s+id:\s+\d+/.test(line)) {
+      inTargetEpic = line.includes(`id: ${epicId}`) || line.includes(`id: "${epicId}"`)
+    }
+    if (inTargetEpic && /^\s*-\s+id:\s+"[\d.]+"|^\s*stories:/.test(line)) {
+      lastStoryLineIdx = i
+    }
+  }
+
+  if (lastStoryLineIdx === -1) return yaml + "\n" + newEntry + "\n"
+
+  // Find the end of the last story block (next epic or end of file)
+  let insertIdx = lastStoryLineIdx + 1
+  while (insertIdx < lines.length) {
+    const l = lines[insertIdx]
+    // Stop at a new top-level epic entry
+    if (/^\s{2}-\s+id:\s+\d/.test(l) && !l.includes(`id: "${epicId}`)) break
+    insertIdx++
+  }
+
+  lines.splice(insertIdx, 0, newEntry)
+  return lines.join("\n")
+}
+
 async function runStorySave(args: StoryArgs): Promise<string> {
   const { epicId, storyTitle, storyDescription, directory, ...runCtx } = args
   const slug = slugify(storyTitle)
@@ -164,52 +233,17 @@ async function runStorySave(args: StoryArgs): Promise<string> {
   const previewStory = await readDoc(directory, `${previewDir}/story.md`)
   const hasPreview = !!previewStory
 
-  // Update sprint-status.yaml — ask LLM to return JSON envelope {id, yaml} for reliable ID extraction
+  // Compute the next story ID deterministically from the existing yaml — no LLM involved
   const existingStatus = await readSprintStatus(directory)
-  const raw = await runAgentSession({ ...runCtx, directory }, "pm", `
-Update this sprint-status.yaml to add a new story to epic ID ${epicId}, then return the result as JSON.
+  const storyNum = computeNextStoryNum(existingStatus, epicId)
+  const storyId = `${epicId}.${storyNum}`
 
-${existingStatus
-    ? `Existing sprint-status.yaml:\n\`\`\`yaml\n${existingStatus}\n\`\`\`\n\nAdd the new story inside the stories list of epic with id: ${epicId}. Use the next available story number within that epic (e.g. if epic 1 already has stories 1.1 and 1.2, the new one is 1.3). Keep all existing entries intact.`
-    : `No sprint-status.yaml exists yet. Create one from scratch.`}
-
-New story to add:
-- title: "${storyTitle}"
-- status: ready-for-dev
-- parent epic id: ${epicId}
-
-Respond with ONLY this JSON (no markdown, no explanation):
-{"id": "<assigned story id like 1.1>", "yaml": "<full updated yaml as a single escaped string>"}
-
-YAML format to follow:
-epics:
-  - id: 1
-    name: "Epic name"
-    status: planned
-    priority: HIGH
-    stories:
-      - id: "1.1"
-        title: "Story title"
-        status: ready-for-dev
-`.trim())
-
-  // Parse JSON envelope — fall back gracefully if LLM ignored the format
-  let storyId = `${epicId}.?`
-  let updatedStatus: string
-  try {
-    const parsed = JSON.parse(raw) as { id: string; yaml: string }
-    storyId = parsed.id
-    updatedStatus = parsed.yaml
-  } catch {
-    // LLM returned raw YAML instead of JSON — use it as-is, ID stays placeholder
-    updatedStatus = raw
-  }
-
-  const storyNum = storyId.includes(".") ? storyId.split(".")[1] : "?"
+  const updatedStatus = appendStoryToYaml(existingStatus, epicId, storyId, storyTitle, slug)
 
   let storyContent: string
   if (hasPreview) {
-    storyContent = previewStory.replace(`# Story ${epicId}.?: ${storyTitle}`, `# Story ${storyId}: ${storyTitle}`)
+    // Replace placeholder ID written during preview — handles both `epicId.?` and any existing numeric ID
+    storyContent = previewStory.replace(/^# Story \d+\.[^:]+:/m, `# Story ${storyId}:`)
   } else {
     const { userStory, tasks } = await generateStoryContent({ ...runCtx, directory, epicId, storyTitle, storyDescription })
     storyContent = buildStoryFile(storyId, storyTitle, userStory, tasks)
