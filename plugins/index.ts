@@ -7,6 +7,7 @@ import { createStoryDevTool, meta as storyDevMeta } from "./workflows/story-dev.
 import { createSprintPreviewTool, createSprintSaveTool, meta as sprintMeta } from "./workflows/sprint.ts"
 import { createReviewPreviewTool, createReviewSaveTool, meta as reviewMeta } from "./workflows/review.ts"
 import { createTaskTool, meta as taskMeta } from "./workflows/task.ts"
+import { createStoryTasksListTool, createStoryTaskTool, meta as storyTaskMeta, metaList as storyTasksListMeta } from "./workflows/story-task.ts"
 import { loadConfig, saveConfig } from "./utils/config.ts"
 import type { WorkflowConfig } from "./types/workflow.ts"
 
@@ -17,7 +18,7 @@ type PluginCtx = {
   project: { root: string }
 }
 
-const allMeta = [metaStatus, epicMeta, storyMeta, storyUpdateMeta, storyDevMeta, sprintMeta, reviewMeta, taskMeta]
+const allMeta = [metaStatus, epicMeta, storyMeta, storyUpdateMeta, storyDevMeta, storyTasksListMeta, storyTaskMeta, sprintMeta, reviewMeta, taskMeta]
 
 const SUPPORTED_LANGUAGES = ["en", "fr", "es", "de", "pt", "it", "ja", "zh"] as const
 
@@ -33,8 +34,10 @@ function buildInitText(config: WorkflowConfig): string {
     "3. /workflow-story         → create a BMAD story for that epic              [repeat per story]",
     "4. /workflow-status        → verify stories appear as ready-for-dev",
     "5. /workflow-sprint        → plan a sprint from your backlog                [once per sprint]",
-    "6. /workflow-story-dev     → dev agent implements the story                 [repeat per story]",
-    "   /workflow-task          → quick fix without epic/story (CSS, bug, tweak) [shortcut]",
+    "6. /workflow-story-tasks   → list tasks in a story with index and status",
+    "   /workflow-story-task   → implement one task at a time (safer, interruptible)",
+    "   /workflow-story-dev    → implement all tasks in one shot (legacy, less control)",
+    "   /workflow-task         → quick fix without epic/story (CSS, bug, tweak)  [shortcut]",
     "7. /workflow-story-update  → mark as review, then done                      [repeat per story]",
     "8. /workflow-review        → adversarial code review before closing          [optional]",
     "```",
@@ -96,6 +99,8 @@ async function WorkflowPlugin(ctx: PluginCtx) {
       workflow_story_save: createStorySaveTool(wfCtx),
       workflow_story_update: createStoryUpdateTool(wfCtx),
       workflow_story_dev: createStoryDevTool(wfCtx),
+      workflow_story_tasks: createStoryTasksListTool(wfCtx),
+      workflow_story_task: createStoryTaskTool(wfCtx),
       workflow_sprint_preview: createSprintPreviewTool(wfCtx),
       workflow_sprint_save: createSprintSaveTool(wfCtx),
       workflow_review_preview: createReviewPreviewTool(wfCtx),
