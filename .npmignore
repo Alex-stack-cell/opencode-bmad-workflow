@@ -4,3 +4,4 @@ package-lock.json
 opencode.json
 plugins/tsconfig.json
 .idea/
+.claude/
