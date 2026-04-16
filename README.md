@@ -7,6 +7,7 @@ A [BMAD](https://github.com/bmad-code-org/BMAD-METHOD) workflow plugin for [open
 Automates the full BMAD development cycle through slash commands and tool calls:
 
 ```
+/workflow-conventions   → generate project conventions (injected into all dev prompts)
 /workflow-epic          → define epics (scope, goal, priority)
 /workflow-story         → create BMAD stories (user story + AC + tasks + dev notes)
 /workflow-story-tasks   → list all tasks in a story with index and status
@@ -27,11 +28,18 @@ ready-for-dev → in-progress → review → done
 
 All tracked in a central `ai-artifacts/sprint-status.yaml` that evolves automatically throughout the project.
 
+### Project conventions
+
+Run `/workflow-conventions` once per project to generate `ai-artifacts/conventions.md`. The architect agent analyzes the codebase and extracts naming rules, patterns, architecture decisions, and testing conventions.
+
+This file is automatically injected into the prompt of every implementation workflow (`workflow_story_task`, `workflow_story_dev`, `workflow_task`). Edit it freely — re-run at any time to refresh it from the codebase.
+
 ### Output structure
 
 ```
 ai-artifacts/
   sprint-status.yaml                          ← central tracking file (living)
+  conventions.md                              ← project conventions (injected into dev prompts)
   planning-artifacts/
     epic-1-[slug].md                          ← epic definition
     sprint-[slug].md                          ← sprint plan
@@ -102,7 +110,8 @@ OPENCODE_CONFIG_DIR=/path/to/your/opencode/config npx opencode-bmad-workflow
 Follow this order to avoid hallucinations and respect the BMAD workflow:
 
 ```
-1. /workflow-setup         → set language (fr, en, es…)
+1. /workflow-setup         → set language (fr, en, es…)                    [once per project]
+   /workflow-conventions  → generate ai-artifacts/conventions.md           [once per project, edit freely]
 2. /workflow-epic          → define your first epic
 3. /workflow-story         → create stories for that epic (repeat)
 4. /workflow-status        → verify stories are ready-for-dev
@@ -167,6 +176,7 @@ agents/
   reviewer.md         # Adversarial code review
 
 commands/
+  workflow-conventions.md
   workflow-init.md
   workflow-setup.md
   workflow-status.md
@@ -178,18 +188,32 @@ commands/
   workflow-story-dev.md
   workflow-sprint.md
   workflow-review.md
+  workflow-task.md
 
 plugins/
   index.ts                    # Registers all tools
   types/
     workflow.ts               # WorkflowCtx, WorkflowRunCtx, WorkflowConfig
     task.ts                   # Task
-  utils/
-    files.ts                  # readDoc, writeDoc, slugify
+    story.ts                  # StoryStatus
+  meta/
+    index.ts                  # Centralized tool descriptors (name, summary, chain, generates)
+  session/
+    context.ts                # getCurrentSessionId, withSession
+    agent.ts                  # runAgentSession, runDevAgentSession
+    polling.ts                # waitForIdle
+  storage/
     config.ts                 # Per-project language config (.workflow-config.json)
-    status.ts                 # sprint-status.yaml IO + story file helpers
-    session.ts                # withSession, runAgentSession, runDevAgentSession
-  workflows/
+    docs.ts                   # readDoc, writeDoc
+    sprint.ts                 # readSprintStatus, writeSprintStatus
+    stories.ts                # findStoryFile, readStoryFile, writeStoryFile
+    progress.ts               # writeProgressFile, clearProgressFile
+  parsers/
+    slugify.ts                # slugify
+    sprint.ts                 # patchStoryStatusInYaml
+    stories.ts                # patchStoryFileStatus
+    tasks.ts                  # parseTopLevelTasks, allTasksDone, markTaskDone, …
+  tools/
     epic.ts                   # workflow_status, workflow_epic_preview/save
     story.ts                  # workflow_story_preview/save
     story-update.ts           # workflow_story_update (pure IO, no LLM)
@@ -197,14 +221,17 @@ plugins/
     story-task.ts             # workflow_story_tasks (list) + workflow_story_task (one at a time)
     sprint.ts                 # workflow_sprint_preview/save
     review.ts                 # workflow_review_preview/save
+    task.ts                   # workflow_task (quick fix)
+    conventions.ts            # workflow_conventions
 ```
 
 ### Architecture principles
 
-- **Orthogonal** — each file owns one responsibility. `status.ts` is the single owner of `sprint-status.yaml` and story files.
+- **Layered** — `session/` owns OpenCode API calls, `storage/` owns file I/O, `parsers/` owns pure transformations, `tools/` owns orchestration. No layer reaches into another's responsibility.
 - **DRY** — `slugify`, `readDoc`, `withSession` are defined once, used everywhere.
 - **KISS** — YAML manipulation is delegated to the LLM (no YAML parser dependency). ID extraction uses a JSON envelope `{id, yaml}` for reliability with a graceful fallback.
 - **Preview/save** — no file is written to its final location without the user reviewing it first.
+- **Deterministic checkboxes** — task checkboxes `[x]` are marked programmatically after each dev session, never delegated to the agent.
 
 Two agent execution modes:
 - **`runAgentSession`** — direct text output only, no tools. Used for PM/architect/analyst agents generating documents.
@@ -213,6 +240,21 @@ Two agent execution modes:
 ### workflow_story_task vs workflow_story_dev
 
 `workflow_story_task` is the recommended way to implement stories. It runs one task per invocation — you validate the result before continuing. `workflow_story_dev` runs all tasks in sequence in child sessions, which is harder to interrupt and less transparent.
+
+---
+
+## Changelog
+
+### v0.3.0
+- **New:** `workflow_conventions` — generates `ai-artifacts/conventions.md` by analyzing the codebase. Injected automatically into all implementation prompts.
+- **Fix:** Task checkboxes `[ ]` are now marked `[x]` programmatically after each dev session (previously relied on the agent, which was unreliable). Subtasks are also checked.
+- **Refactor:** Plugin internals restructured into `session/`, `storage/`, `parsers/`, `tools/`, and `meta/` layers for maintainability.
+
+### v0.2.0
+- Added `workflow_story_task` and `workflow_story_tasks` for task-by-task implementation.
+
+### v0.1.0
+- Initial release.
 
 ---
 
