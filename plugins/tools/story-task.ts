@@ -6,6 +6,9 @@ import { runDevAgentSession } from "../session/agent.ts"
 import { readStoryFile, writeStoryFile } from "../storage/stories.ts"
 import { readDoc } from "../storage/docs.ts"
 import { parseTopLevelTasks, allTasksDone, markTaskDone } from "../parsers/tasks.ts"
+import { readSprintStatus, writeSprintStatus } from "../storage/sprint.ts"
+import { patchStoryStatusInYaml } from "../parsers/sprint.ts"
+import { patchStoryFileStatus } from "../parsers/stories.ts"
 
 // ─── Tool: list ───────────────────────────────────────────────────────────────
 
@@ -82,26 +85,36 @@ async function runStoryTask({ storyId, taskIndex, directory, ...runCtx }: StoryT
     buildPrompt(target, tasks.length, isLast, content, conventions),
   )
 
-  // Programmatically mark the task and its subtasks done — don't rely on the agent
   const afterDev = await readStoryFile(directory, storyId)
   if (afterDev) {
     await writeStoryFile(directory, storyId, markTaskDone(afterDev, target.index))
   }
 
   const updated = await readStoryFile(directory, storyId)
-  const remaining = (updated?.match(/^- \[ \]/gm) ?? []).length
+  const remaining = (updated?.match(/^- \[ \]/gim) ?? []).length
 
-  return [
+  const lines = [
     `# Story ${storyId} — Task ${target.index} done`,
     "",
     `**Task:** ${target.label}`,
     "",
     summary,
     "",
-    remaining > 0
-      ? `${remaining} task(s) remaining. Run \`workflow_story_task\` to continue, or \`workflow_story_tasks\` to pick by index.`
-      : `All tasks done! Run \`workflow_story_update\` with status \`review\`.`,
-  ].join("\n")
+  ]
+
+  if (remaining === 0 && updated) {
+    const yaml = await readSprintStatus(directory)
+    if (yaml) {
+      await writeSprintStatus(directory, patchStoryStatusInYaml(yaml, storyId, "review"))
+    }
+    await writeStoryFile(directory, storyId, patchStoryFileStatus(updated, "review"))
+    lines.push(`✅ All tasks done — story ${storyId} automatically moved to \`review\`.`)
+    lines.push(`Run \`workflow_review\` to perform a code review before marking done.`)
+  } else {
+    lines.push(`${remaining} task(s) remaining. Run \`workflow_story_task\` to continue, or \`workflow_story_tasks\` to pick by index.`)
+  }
+
+  return lines.join("\n")
 }
 
 function resolveTarget(tasks: Task[], taskIndex?: number): Task | { error: string } {
