@@ -1,14 +1,28 @@
 import { tool } from "@opencode-ai/plugin"
 import type { OpencodeClient } from "@opencode-ai/sdk"
-import { createStatusTool, createEpicPreviewTool, createEpicSaveTool, meta as epicMeta, metaStatus } from "./workflows/epic.ts"
-import { createStoryPreviewTool, createStorySaveTool, meta as storyMeta } from "./workflows/story.ts"
-import { createStoryUpdateTool, meta as storyUpdateMeta } from "./workflows/story-update.ts"
-import { createStoryDevTool, meta as storyDevMeta } from "./workflows/story-dev.ts"
-import { createSprintPreviewTool, createSprintSaveTool, meta as sprintMeta } from "./workflows/sprint.ts"
-import { createReviewPreviewTool, createReviewSaveTool, meta as reviewMeta } from "./workflows/review.ts"
-import { createTaskTool, meta as taskMeta } from "./workflows/task.ts"
-import { createStoryTasksListTool, createStoryTaskTool, meta as storyTaskMeta, metaList as storyTasksListMeta } from "./workflows/story-task.ts"
-import { loadConfig, saveConfig } from "./utils/config.ts"
+import { createStatusTool, createEpicPreviewTool, createEpicSaveTool } from "./tools/epic.ts"
+import { createStoryPreviewTool, createStorySaveTool } from "./tools/story.ts"
+import { createStoryUpdateTool } from "./tools/story-update.ts"
+import { createStoryDevTool } from "./tools/story-dev.ts"
+import { createStoryTasksListTool, createStoryTaskTool } from "./tools/story-task.ts"
+import { createSprintPreviewTool, createSprintSaveTool } from "./tools/sprint.ts"
+import { createReviewPreviewTool, createReviewSaveTool } from "./tools/review.ts"
+import { createTaskTool } from "./tools/task.ts"
+import { createConventionsTool } from "./tools/conventions.ts"
+import {
+  metaStatus,
+  metaEpic,
+  metaStory,
+  metaStoryUpdate,
+  metaStoryDev,
+  metaStoryTasksList,
+  metaStoryTask,
+  metaSprint,
+  metaReview,
+  metaTask,
+  metaConventions,
+} from "./meta/index.ts"
+import { loadConfig, saveConfig } from "./storage/config.ts"
 import type { WorkflowConfig } from "./types/workflow.ts"
 
 type PluginCtx = {
@@ -18,7 +32,19 @@ type PluginCtx = {
   project: { root: string }
 }
 
-const allMeta = [metaStatus, epicMeta, storyMeta, storyUpdateMeta, storyDevMeta, storyTasksListMeta, storyTaskMeta, sprintMeta, reviewMeta, taskMeta]
+const allMeta = [
+  metaStatus,
+  metaEpic,
+  metaStory,
+  metaStoryUpdate,
+  metaStoryDev,
+  metaStoryTasksList,
+  metaStoryTask,
+  metaSprint,
+  metaReview,
+  metaTask,
+  metaConventions,
+]
 
 const SUPPORTED_LANGUAGES = ["en", "fr", "es", "de", "pt", "it", "ja", "zh"] as const
 
@@ -30,6 +56,7 @@ function buildInitText(config: WorkflowConfig): string {
     "",
     "```",
     "1. /workflow-setup         → set language (fr, en, es…)                    [once per project]",
+    "   /workflow-conventions  → generate ai-artifacts/conventions.md           [once per project, edit freely]",
     "2. /workflow-epic          → define an epic (scope, goal, priority)         [once per epic]",
     "3. /workflow-story         → create a BMAD story for that epic              [repeat per story]",
     "4. /workflow-status        → verify stories appear as ready-for-dev",
@@ -106,6 +133,7 @@ async function WorkflowPlugin(ctx: PluginCtx) {
       workflow_review_preview: createReviewPreviewTool(wfCtx),
       workflow_review_save: createReviewSaveTool(wfCtx),
       workflow_task: createTaskTool(wfCtx),
+      workflow_conventions: createConventionsTool(wfCtx),
     },
   }
 }

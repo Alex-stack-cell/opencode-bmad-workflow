@@ -1,35 +1,11 @@
 import { tool } from "@opencode-ai/plugin"
-import { withSession, runDevAgentSession } from "../utils/session.ts"
-import { readStoryFile, allTasksDone } from "../utils/status.ts"
-import type { Task } from "../types/task.ts"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
-
-// ─── Metadata ─────────────────────────────────────────────────────────────────
-
-export const metaList = {
-  name: "workflow_story_tasks",
-  summary: "List tasks in a story with index and status",
-}
-
-export const meta = {
-  name: "workflow_story_task",
-  summary: "Implement one task at a time from a story (safer than workflow_story_dev)",
-}
-
-// ─── Parsing ──────────────────────────────────────────────────────────────────
-
-function parseTopLevelTasks(content: string): Task[] {
-  const tasks: Task[] = []
-  let i = 0
-  for (const line of content.split("\n")) {
-    if (/^- \[x\]/i.test(line)) {
-      tasks.push({ index: ++i, done: true, label: line.replace(/^- \[x\]\s*/i, "").trim() })
-    } else if (/^- \[ \]/.test(line)) {
-      tasks.push({ index: ++i, done: false, label: line.replace(/^- \[ \]\s*/, "").trim() })
-    }
-  }
-  return tasks
-}
+import type { Task } from "../types/task.ts"
+import { withSession } from "../session/context.ts"
+import { runDevAgentSession } from "../session/agent.ts"
+import { readStoryFile, writeStoryFile } from "../storage/stories.ts"
+import { readDoc } from "../storage/docs.ts"
+import { parseTopLevelTasks, allTasksDone, markTaskDone } from "../parsers/tasks.ts"
 
 // ─── Tool: list ───────────────────────────────────────────────────────────────
 
@@ -98,12 +74,19 @@ async function runStoryTask({ storyId, taskIndex, directory, ...runCtx }: StoryT
 
   if ("error" in target) return target.error
 
+  const conventions = await readDoc(directory, "ai-artifacts/conventions.md")
   const isLast = tasks.filter((t) => !t.done).length === 1
   const summary = await runDevAgentSession(
     { ...runCtx, directory },
     "dev",
-    buildPrompt(target, tasks.length, isLast, content),
+    buildPrompt(target, tasks.length, isLast, content, conventions),
   )
+
+  // Programmatically mark the task and its subtasks done — don't rely on the agent
+  const afterDev = await readStoryFile(directory, storyId)
+  if (afterDev) {
+    await writeStoryFile(directory, storyId, markTaskDone(afterDev, target.index))
+  }
 
   const updated = await readStoryFile(directory, storyId)
   const remaining = (updated?.match(/^- \[ \]/gm) ?? []).length
@@ -131,7 +114,7 @@ function resolveTarget(tasks: Task[], taskIndex?: number): Task | { error: strin
   return tasks.find((t) => !t.done) ?? { error: `All tasks are done. Run \`workflow_story_update\` to finalize.` }
 }
 
-function buildPrompt(target: Task, total: number, isLast: boolean, storyContent: string): string {
+function buildPrompt(target: Task, total: number, isLast: boolean, storyContent: string, conventions: string): string {
   return `
 You are implementing task ${target.index} of ${total} from a BMAD story. Implement ONLY this task.
 
@@ -140,15 +123,14 @@ ${target.label}
 
 ## Story context (AC, dev notes, patterns — do NOT implement other tasks)
 ${storyContent}
-
+${conventions ? `\n## Project conventions\n${conventions}\n` : ""}
 ## Instructions
 1. Read relevant files before making changes.
 2. Implement this task only, including its subtasks.
-3. Mark it done in the story file: change \`- [ ]\` to \`- [x]\` for this line only.
-4. ${isLast
+3. ${isLast
     ? `This is the last task. Update the \`## Dev Agent Record\` section: Agent Model Used, Completion Notes, Files Modified.`
     : `Do NOT touch the Dev Agent Record — more tasks remain.`}
-5. Follow existing codebase patterns. No unrelated changes.
+4. Follow existing codebase patterns and the project conventions above. No unrelated changes.
 
 Summarize in 2–3 sentences what you implemented and which files were modified.
 `.trim()

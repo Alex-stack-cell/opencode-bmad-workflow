@@ -1,19 +1,12 @@
 import { tool } from "@opencode-ai/plugin"
-import { runAgentSession, withSession } from "../utils/session.ts"
-import { writeDoc, readDoc, slugify } from "../utils/files.ts"
-import { readSprintStatus, writeSprintStatus } from "../utils/status.ts"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
-
-// ─── Metadata ─────────────────────────────────────────────────────────────────
-
-export const meta = {
-  name: "workflow_story_save",
-  summary: "New story",
-  chain: "PM (story) → Architect (tasks + dev notes) → updates sprint-status.yaml",
-  generates: "ai-artifacts/implementation-artifacts/stories/[n-m]-[slug].md",
-}
+import { withSession } from "../session/context.ts"
+import { runAgentSession } from "../session/agent.ts"
+import { readDoc, writeDoc } from "../storage/docs.ts"
+import { readSprintStatus, writeSprintStatus } from "../storage/sprint.ts"
+import { slugify } from "../parsers/slugify.ts"
 
 // ─── Tool factories ───────────────────────────────────────────────────────────
 
@@ -156,23 +149,14 @@ async function runStoryPreview(args: StoryArgs): Promise<string> {
   ].join("\n")
 }
 
-/**
- * Parses sprint-status.yaml (as raw text) and returns the next available story
- * number for the given epic. Deterministic — never delegates to the LLM.
- */
 function computeNextStoryNum(yaml: string, epicId: number): number {
   if (!yaml) return 1
-  const prefix = `${epicId}.`
   const nums = [...yaml.matchAll(/id:\s*"(\d+)\.(\d+)"/g)]
     .filter(([, eId]) => Number(eId) === epicId)
     .map(([, , sNum]) => Number(sNum))
   return nums.length > 0 ? Math.max(...nums) + 1 : 1
 }
 
-/**
- * Appends a new story entry to the stories list of the target epic in the raw
- * sprint-status.yaml string. Deterministic — never delegates to the LLM.
- */
 function appendStoryToYaml(yaml: string, epicId: number, storyId: string, title: string, slug: string): string {
   const newEntry = [
     `      - id: "${storyId}"`,
@@ -195,7 +179,6 @@ function appendStoryToYaml(yaml: string, epicId: number, storyId: string, title:
     ].join("\n") + "\n"
   }
 
-  // Insert after the last story entry of the target epic, or after the epic's `stories:` line
   const lines = yaml.split("\n")
   let inTargetEpic = false
   let lastStoryLineIdx = -1
@@ -212,11 +195,9 @@ function appendStoryToYaml(yaml: string, epicId: number, storyId: string, title:
 
   if (lastStoryLineIdx === -1) return yaml + "\n" + newEntry + "\n"
 
-  // Find the end of the last story block (next epic or end of file)
   let insertIdx = lastStoryLineIdx + 1
   while (insertIdx < lines.length) {
     const l = lines[insertIdx]
-    // Stop at a new top-level epic entry
     if (/^\s{2}-\s+id:\s+\d/.test(l) && !l.includes(`id: "${epicId}`)) break
     insertIdx++
   }
@@ -233,7 +214,6 @@ async function runStorySave(args: StoryArgs): Promise<string> {
   const previewStory = await readDoc(directory, `${previewDir}/story.md`)
   const hasPreview = !!previewStory
 
-  // Compute the next story ID deterministically from the existing yaml — no LLM involved
   const existingStatus = await readSprintStatus(directory)
   const storyNum = computeNextStoryNum(existingStatus, epicId)
   const storyId = `${epicId}.${storyNum}`
@@ -242,7 +222,6 @@ async function runStorySave(args: StoryArgs): Promise<string> {
 
   let storyContent: string
   if (hasPreview) {
-    // Replace placeholder ID written during preview — handles both `epicId.?` and any existing numeric ID
     storyContent = previewStory.replace(/^# Story \d+\.[^:]+:/m, `# Story ${storyId}:`)
   } else {
     const { userStory, tasks } = await generateStoryContent({ ...runCtx, directory, epicId, storyTitle, storyDescription })

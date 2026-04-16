@@ -1,18 +1,10 @@
 import { tool } from "@opencode-ai/plugin"
-import { withSession, runDevAgentSession } from "../utils/session.ts"
-import { readDoc, writeDoc } from "../utils/files.ts"
 import { readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
-
-// ─── Metadata ─────────────────────────────────────────────────────────────────
-
-export const meta = {
-  name: "workflow_task",
-  summary: "Quick task",
-  chain: "Escalation check → Dev agent (direct implementation) → quick-tasks-log.yaml",
-  generates: "ai-artifacts/quick-tasks-log.yaml",
-}
+import { withSession } from "../session/context.ts"
+import { runDevAgentSession } from "../session/agent.ts"
+import { readDoc } from "../storage/docs.ts"
 
 // ─── Tool factory ─────────────────────────────────────────────────────────────
 
@@ -33,7 +25,6 @@ export function createTaskTool(ctx: WorkflowCtx) {
 
 type TaskArgs = WorkflowRunCtx & { description: string }
 
-/** Escalation signals inspired by BMAD quick-dev step-01 */
 function evaluateEscalation(description: string): "simple" | "warn" | "escalate" {
   const text = description.toLowerCase()
 
@@ -103,11 +94,9 @@ function generateTaskId(existing: string): string {
 async function runTask(args: TaskArgs): Promise<string> {
   const { description, directory, ...runCtx } = args
 
-  // Read existing log to generate unique ID
   const existingLog = await readQuickTasksLog(directory)
   const taskId = generateTaskId(existingLog)
 
-  // Escalation check
   const level = evaluateEscalation(description)
 
   if (level === "escalate") {
@@ -137,16 +126,17 @@ async function runTask(args: TaskArgs): Promise<string> {
     ].join("\n")
   }
 
-  // Simple task — implement directly
+  const conventions = await readDoc(directory, "ai-artifacts/conventions.md")
+
   const summary = await runDevAgentSession({ ...runCtx, directory }, "dev", `
 You are implementing a quick fix or small feature directly. No story file exists — work from the description below.
 
 ## Task
 ${description}
-
+${conventions ? `\n## Project conventions\n${conventions}\n` : ""}
 ## Instructions
 1. Read the relevant files in the codebase before making changes
-2. Implement the fix following existing patterns strictly
+2. Implement the fix following existing patterns and the project conventions above
 3. Keep the change minimal and focused — do NOT add unrelated improvements
 4. Write a 2-3 sentence summary of what you changed and which files were modified
 

@@ -1,24 +1,11 @@
 import { tool } from "@opencode-ai/plugin"
-import { withSession } from "../utils/session.ts"
-import {
-  readSprintStatus,
-  writeSprintStatus,
-  patchStoryStatusInYaml,
-  readStoryFile,
-  writeStoryFile,
-  patchStoryFileStatus,
-  type StoryStatus,
-} from "../utils/status.ts"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
-
-// ─── Metadata ─────────────────────────────────────────────────────────────────
-
-export const meta = {
-  name: "workflow_story_update",
-  summary: "Update story status",
-  chain: "Pure IO — updates sprint-status.yaml + story file (no LLM)",
-  generates: "(updates existing files)",
-}
+import type { StoryStatus } from "../types/story.ts"
+import { withSession } from "../session/context.ts"
+import { readSprintStatus, writeSprintStatus } from "../storage/sprint.ts"
+import { readStoryFile, writeStoryFile } from "../storage/stories.ts"
+import { patchStoryStatusInYaml } from "../parsers/sprint.ts"
+import { patchStoryFileStatus } from "../parsers/stories.ts"
 
 const STORY_STATUSES = [
   "ready-for-dev",
@@ -56,7 +43,6 @@ type StoryUpdateArgs = WorkflowRunCtx & { storyId: string; status: StoryStatus; 
 async function runStoryUpdate(args: StoryUpdateArgs): Promise<string> {
   const { storyId, status, note, directory } = args
 
-  // Update sprint-status.yaml
   const yaml = await readSprintStatus(directory)
   if (!yaml) {
     return `Error: sprint-status.yaml not found. Run \`workflow_epic_preview\` first to create it.`
@@ -76,7 +62,6 @@ async function runStoryUpdate(args: StoryUpdateArgs): Promise<string> {
 
   await writeSprintStatus(directory, yamlWithNote)
 
-  // Update story file
   const storyContent = await readStoryFile(directory, storyId)
   const lines: string[] = [`# Workflow: Story Update — ${storyId} → ${status}`]
 

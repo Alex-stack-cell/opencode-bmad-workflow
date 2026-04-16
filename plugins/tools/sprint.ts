@@ -1,19 +1,12 @@
 import { tool } from "@opencode-ai/plugin"
-import { runAgentSession, withSession } from "../utils/session.ts"
-import { writeDoc, readDoc, slugify } from "../utils/files.ts"
-import { readSprintStatus, writeSprintStatus } from "../utils/status.ts"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
-
-// ─── Metadata ─────────────────────────────────────────────────────────────────
-
-export const meta = {
-  name: "workflow_sprint_save",
-  summary: "Sprint planning",
-  chain: "PM (plan from backlog) → updates sprint-status.yaml story statuses",
-  generates: "ai-artifacts/planning-artifacts/sprint-[slug].md",
-}
+import { withSession } from "../session/context.ts"
+import { runAgentSession } from "../session/agent.ts"
+import { readDoc, writeDoc } from "../storage/docs.ts"
+import { readSprintStatus, writeSprintStatus } from "../storage/sprint.ts"
+import { slugify } from "../parsers/slugify.ts"
 
 // ─── Tool factories ───────────────────────────────────────────────────────────
 
@@ -83,7 +76,6 @@ async function runSprintPreview(args: SprintArgs): Promise<string> {
   const slug = slugify(sprintGoal)
   const previewDir = `ai-artifacts/.previews/sprint-${slug}`
 
-  // Guard: check that there are stories ready to plan before calling the LLM
   const yaml = await readSprintStatus(directory)
   if (!yaml) {
     return [
@@ -149,7 +141,6 @@ async function runSprintSave(args: SprintArgs): Promise<string> {
     currentStatus = generated.currentStatus
   }
 
-  // Update sprint-status.yaml — mark selected stories as in-progress
   const updatedStatus = currentStatus
     ? await runAgentSession({ ...runCtx, directory }, "pm", `
 Update sprint-status.yaml to mark the stories selected for this sprint as "in-progress".

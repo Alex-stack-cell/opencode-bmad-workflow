@@ -1,18 +1,11 @@
 import { tool } from "@opencode-ai/plugin"
-import { runAgentSession, withSession } from "../utils/session.ts"
-import { writeDoc, readDoc, slugify } from "../utils/files.ts"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
-
-// ─── Metadata ─────────────────────────────────────────────────────────────────
-
-export const meta = {
-  name: "workflow_review_save",
-  summary: "Code review",
-  chain: "Analyst (analysis) → Reviewer (report)",
-  generates: "ai-artifacts/planning-artifacts/review-[slug]/ANALYSIS.md, REVIEW.md",
-}
+import { withSession } from "../session/context.ts"
+import { runAgentSession } from "../session/agent.ts"
+import { readDoc, writeDoc } from "../storage/docs.ts"
+import { slugify } from "../parsers/slugify.ts"
 
 // ─── Tool factories ───────────────────────────────────────────────────────────
 

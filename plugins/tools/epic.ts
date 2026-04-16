@@ -1,26 +1,12 @@
 import { tool } from "@opencode-ai/plugin"
-import { runAgentSession, withSession } from "../utils/session.ts"
-import { writeDoc, readDoc, slugify } from "../utils/files.ts"
-import { readSprintStatus, writeSprintStatus } from "../utils/status.ts"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
-
-// ─── Metadata ─────────────────────────────────────────────────────────────────
-
-export const meta = {
-  name: "workflow_epic_save",
-  summary: "New epic",
-  chain: "PM (scope) → updates docs/OVERVIEW.md, docs/ROADMAP.md, sprint-status.yaml",
-  generates: "ai-artifacts/planning-artifacts/epic-[n]-[slug].md",
-}
-
-export const metaStatus = {
-  name: "workflow_status",
-  summary: "Project status",
-  chain: "Reads sprint-status.yaml",
-  generates: "(read-only)",
-}
+import { withSession } from "../session/context.ts"
+import { runAgentSession } from "../session/agent.ts"
+import { readDoc, writeDoc } from "../storage/docs.ts"
+import { readSprintStatus, writeSprintStatus } from "../storage/sprint.ts"
+import { slugify } from "../parsers/slugify.ts"
 
 // ─── Tool factories ───────────────────────────────────────────────────────────
 
@@ -191,7 +177,6 @@ async function runEpicSave(args: EpicArgs): Promise<string> {
     updatedRoadmap = generated.updatedRoadmap
   }
 
-  // Update sprint-status.yaml — ask LLM to return JSON envelope {id, yaml} for reliable ID extraction
   const existingStatus = await readSprintStatus(directory)
   const raw = await runAgentSession({ ...runCtx, directory }, "pm", `
 Update this sprint-status.yaml to add a new epic entry, then return the result as JSON.
@@ -219,7 +204,6 @@ epics:
     stories: []
 `.trim())
 
-  // Parse JSON envelope — fall back gracefully if LLM ignored the format
   let epicId = "n"
   let updatedStatus: string
   try {
@@ -227,7 +211,6 @@ epics:
     epicId = String(parsed.id)
     updatedStatus = parsed.yaml
   } catch {
-    // LLM returned raw YAML instead of JSON — use it as-is, ID stays "n"
     updatedStatus = raw
   }
 
