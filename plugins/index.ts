@@ -1,4 +1,4 @@
-import type { PluginCtx, WorkflowCtx } from "./types/workflow.ts"
+import type { PluginCtx, WorkflowCtx, ToolFactory } from "./types/workflow.ts"
 import { createInitTool, createSetupTool } from "./tools/setup.ts"
 import { createStatusTool } from "./tools/status.ts"
 import { createEpicPreviewTool, createEpicSaveTool } from "./tools/epic.ts"
@@ -10,8 +10,6 @@ import { createSprintPreviewTool, createSprintSaveTool } from "./tools/sprint.ts
 import { createReviewPreviewTool, createReviewSaveTool } from "./tools/review.ts"
 import { createTaskTool } from "./tools/task.ts"
 import { createConventionsTool } from "./tools/conventions.ts"
-
-type ToolFactory = (ctx: WorkflowCtx) => unknown
 
 const toolRegistry: Record<string, ToolFactory> = {
   workflow_init: createInitTool,

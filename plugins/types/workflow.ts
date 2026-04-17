@@ -33,3 +33,6 @@ export type PluginCtx = {
   worktree: string
   project: { root: string }
 }
+
+/** A function that takes a WorkflowCtx and returns an instantiated tool. */
+export type ToolFactory = (ctx: WorkflowCtx) => unknown
