@@ -191,30 +191,39 @@ commands/
   workflow-task.md
 
 plugins/
-  index.ts                    # Registers all tools
+  index.ts                    # Declarative tool registry + plugin entry point
+  agents/
+    roles.ts                  # AgentRole constants (PM, ARCHITECT, DEV, ANALYST, REVIEWER)
+  constants/
+    paths.ts                  # All artifact/doc paths in one place (static + dynamic)
+  workflows/
+    preview-save.ts           # loadPreview, saveFiles, cleanPreview — shared preview/save utilities
   types/
-    workflow.ts               # WorkflowCtx, WorkflowRunCtx, WorkflowConfig
+    workflow.ts               # PluginCtx, WorkflowCtx, WorkflowRunCtx, WorkflowConfig, ToolFactory
     task.ts                   # Task
     story.ts                  # StoryStatus
   meta/
-    index.ts                  # Centralized tool descriptors (name, summary, chain, generates)
+    index.ts                  # Tool descriptors (name, summary, chain, generates) + allMeta
   session/
     context.ts                # getCurrentSessionId, withSession
     agent.ts                  # runAgentSession, runDevAgentSession
     polling.ts                # waitForIdle
   storage/
-    config.ts                 # Per-project language config (.workflow-config.json)
+    config.ts                 # Per-project language config
     docs.ts                   # readDoc, writeDoc
     sprint.ts                 # readSprintStatus, writeSprintStatus
     stories.ts                # findStoryFile, readStoryFile, writeStoryFile
     progress.ts               # writeProgressFile, clearProgressFile
+    quick-tasks.ts            # readQuickTasksLog, appendQuickTask, generateTaskId
   parsers/
     slugify.ts                # slugify
-    sprint.ts                 # patchStoryStatusInYaml
+    sprint.ts                 # patchStoryStatusInYaml, computeNextStoryNum, appendStoryToYaml, …
     stories.ts                # patchStoryFileStatus
     tasks.ts                  # parseTopLevelTasks, allTasksDone, markTaskDone, …
   tools/
-    epic.ts                   # workflow_status, workflow_epic_preview/save
+    setup.ts                  # workflow_init, workflow_setup
+    status.ts                 # workflow_status
+    epic.ts                   # workflow_epic_preview/save
     story.ts                  # workflow_story_preview/save
     story-update.ts           # workflow_story_update (pure IO, no LLM)
     story-dev.ts              # workflow_story_dev (all tasks in one shot)
@@ -228,6 +237,8 @@ plugins/
 ### Architecture principles
 
 - **Layered** — `session/` owns OpenCode API calls, `storage/` owns file I/O, `parsers/` owns pure transformations, `tools/` owns orchestration. No layer reaches into another's responsibility.
+- **Single source of truth** — all artifact paths live in `constants/paths.ts`; all agent role names live in `agents/roles.ts`. No magic strings scattered across the codebase.
+- **Shared preview/save pattern** — `workflows/preview-save.ts` centralizes the load-from-preview-or-generate logic used by all document-generating tools (epic, story, sprint, review).
 - **DRY** — `slugify`, `readDoc`, `withSession` are defined once, used everywhere.
 - **KISS** — YAML manipulation is delegated to the LLM (no YAML parser dependency). ID extraction uses a JSON envelope `{id, yaml}` for reliability with a graceful fallback.
 - **Preview/save** — no file is written to its final location without the user reviewing it first.
@@ -244,6 +255,19 @@ Two agent execution modes:
 ---
 
 ## Changelog
+
+### v0.3.2
+- **Refactor:** `constants/paths.ts` — all artifact and doc paths centralized, no more scattered hardcoded strings.
+- **Refactor:** `agents/roles.ts` — agent role names (`pm`, `architect`, `dev`, `analyst`, `reviewer`) are now typed constants, no magic strings in tool code.
+- **Refactor:** `workflows/preview-save.ts` — `loadPreview`, `saveFiles`, `cleanPreview` extracted from the four document-generating tools (epic, story, sprint, review) into a shared module.
+- **Refactor:** `storage/quick-tasks.ts` — quick task log I/O extracted from `tools/task.ts`.
+- **Refactor:** `tools/setup.ts` — `workflow_init` and `workflow_setup` extracted from `index.ts`; `index.ts` is now a pure declarative tool registry.
+- **Refactor:** `tools/status.ts` — `workflow_status` extracted from `tools/epic.ts`.
+- **Fix:** Output strings in `workflow_task` were hardcoded in French — now in English, consistent with all other tools.
+- **Types:** All internal workflow argument types renamed to `*WorkflowArgs` for consistency.
+
+### v0.3.1
+- **Fix:** Robust task/subtask checkbox marking and auto-advance story + epic status.
 
 ### v0.3.0
 - **New:** `workflow_conventions` — generates `ai-artifacts/conventions.md` by analyzing the codebase. Injected automatically into all implementation prompts.
