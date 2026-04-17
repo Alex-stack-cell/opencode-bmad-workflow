@@ -1,13 +1,12 @@
 import { readdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-
-const STORIES_DIR = "ai-artifacts/implementation-artifacts/stories"
+import { Paths } from "../constants/paths.ts"
 
 export async function findStoryFile(projectDir: string, storyId: string): Promise<string | null> {
   const [epicId, storyNum] = storyId.split(".")
   if (!epicId || !storyNum) return null
 
-  const dir = join(projectDir, STORIES_DIR)
+  const dir = join(projectDir, Paths.STORIES_DIR)
   try {
     const entries = await readdir(dir)
     const match = entries.find((f) => f.startsWith(`${epicId}-${storyNum}-`) && f.endsWith(".md"))

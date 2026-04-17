@@ -1,12 +1,12 @@
 import { tool } from "@opencode-ai/plugin"
-import { rm } from "node:fs/promises"
-import { join } from "node:path"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
 import { withSession } from "../session/context.ts"
 import { runAgentSession } from "../session/agent.ts"
-import { readDoc, writeDoc } from "../storage/docs.ts"
 import { readSprintStatus, writeSprintStatus } from "../storage/sprint.ts"
 import { slugify } from "../parsers/slugify.ts"
+import { Paths } from "../constants/paths.ts"
+import { AgentRole } from "../agents/roles.ts"
+import { loadPreview, saveFiles, cleanPreview } from "../workflows/preview-save.ts"
 
 // ─── Tool factories ───────────────────────────────────────────────────────────
 
@@ -42,9 +42,9 @@ export function createSprintSaveTool(ctx: WorkflowCtx) {
 
 // ─── Workflow implementation ──────────────────────────────────────────────────
 
-type SprintArgs = WorkflowRunCtx & { sprintGoal: string; durationWeeks?: number }
+type SprintWorkflowArgs = WorkflowRunCtx & { sprintGoal: string; durationWeeks?: number }
 
-async function generateSprintContent(args: SprintArgs) {
+async function generateSprintContent(args: SprintWorkflowArgs) {
   const { sprintGoal, durationWeeks = 2, directory, ...runCtx } = args
 
   const currentStatus = await readSprintStatus(directory)
@@ -52,7 +52,7 @@ async function generateSprintContent(args: SprintArgs) {
     ? `Current sprint-status.yaml:\n\`\`\`yaml\n${currentStatus}\n\`\`\`\n\nSelect stories with status "ready-for-dev" that fit this sprint. Do NOT invent stories that are not in this file.`
     : `No sprint-status.yaml found. Do NOT invent stories — return an empty plan and ask the user to create stories first.`
 
-  const plan = await runAgentSession({ ...runCtx, directory }, "pm", `
+  const plan = await runAgentSession({ ...runCtx, directory }, AgentRole.PM, `
 Create a sprint plan using BMAD methodology.
 
 Sprint goal: ${sprintGoal}
@@ -71,10 +71,10 @@ Include:
   return { plan, currentStatus }
 }
 
-async function runSprintPreview(args: SprintArgs): Promise<string> {
+async function runSprintPreview(args: SprintWorkflowArgs): Promise<string> {
   const { sprintGoal, directory } = args
   const slug = slugify(sprintGoal)
-  const previewDir = `ai-artifacts/.previews/sprint-${slug}`
+  const previewDir = Paths.sprintPreviewDir(slug)
 
   const yaml = await readSprintStatus(directory)
   if (!yaml) {
@@ -108,7 +108,7 @@ async function runSprintPreview(args: SprintArgs): Promise<string> {
 
   const { plan } = await generateSprintContent(args)
 
-  await writeDoc(directory, `${previewDir}/sprint-plan.md`, plan)
+  await saveFiles(directory, { [`${previewDir}/sprint-plan.md`]: plan })
 
   return [
     `# Preview ready — Sprint: ${sprintGoal}`,
@@ -121,19 +121,19 @@ async function runSprintPreview(args: SprintArgs): Promise<string> {
   ].join("\n")
 }
 
-async function runSprintSave(args: SprintArgs): Promise<string> {
+async function runSprintSave(args: SprintWorkflowArgs): Promise<string> {
   const { sprintGoal, directory, ...runCtx } = args
   const slug = slugify(sprintGoal)
-  const previewDir = `ai-artifacts/.previews/sprint-${slug}`
+  const previewDir = Paths.sprintPreviewDir(slug)
 
-  const previewPlan = await readDoc(directory, `${previewDir}/sprint-plan.md`)
-  const hasPreview = !!previewPlan
+  const preview = await loadPreview(directory, { plan: `${previewDir}/sprint-plan.md` })
+  const hasPreview = preview !== null
 
   let plan: string
   let currentStatus: string
 
   if (hasPreview) {
-    plan = previewPlan
+    plan = preview.plan
     currentStatus = await readSprintStatus(directory)
   } else {
     const generated = await generateSprintContent(args)
@@ -142,7 +142,7 @@ async function runSprintSave(args: SprintArgs): Promise<string> {
   }
 
   const updatedStatus = currentStatus
-    ? await runAgentSession({ ...runCtx, directory }, "pm", `
+    ? await runAgentSession({ ...runCtx, directory }, AgentRole.PM, `
 Update sprint-status.yaml to mark the stories selected for this sprint as "in-progress".
 
 Sprint plan (lists which stories are selected):
@@ -164,7 +164,7 @@ Output ONLY the raw YAML content, no markdown fences, no explanation.
   lines.push(`# Workflow: Sprint Planning — ${sprintGoal}`)
   if (hasPreview) lines.push(`> Loaded from preview (including any edits you made).\n`)
 
-  const planPath = await writeDoc(directory, `ai-artifacts/planning-artifacts/sprint-${slug}.md`, plan)
+  const [planPath] = await saveFiles(directory, { [Paths.sprintPlanFile(slug)]: plan })
   lines.push(`   ✓ Sprint plan written → ${planPath}`)
 
   if (updatedStatus) {
@@ -173,7 +173,7 @@ Output ONLY the raw YAML content, no markdown fences, no explanation.
   }
 
   if (hasPreview) {
-    await rm(join(directory, previewDir), { recursive: true, force: true })
+    await cleanPreview(directory, previewDir)
     lines.push(`   ✓ Preview cleaned up`)
   }
 

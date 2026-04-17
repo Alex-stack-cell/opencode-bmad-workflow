@@ -9,6 +9,8 @@ import { parseTopLevelTasks, allTasksDone, markTaskDone } from "../parsers/tasks
 import { readSprintStatus, writeSprintStatus } from "../storage/sprint.ts"
 import { patchStoryStatusInYaml } from "../parsers/sprint.ts"
 import { patchStoryFileStatus } from "../parsers/stories.ts"
+import { Paths } from "../constants/paths.ts"
+import { AgentRole } from "../agents/roles.ts"
 
 // ─── Tool: list ───────────────────────────────────────────────────────────────
 
@@ -62,9 +64,9 @@ export function createStoryTaskTool(ctx: WorkflowCtx) {
 
 // ─── Orchestration ────────────────────────────────────────────────────────────
 
-type StoryTaskArgs = WorkflowRunCtx & { storyId: string; taskIndex?: number }
+type StoryTaskWorkflowArgs = WorkflowRunCtx & { storyId: string; taskIndex?: number }
 
-async function runStoryTask({ storyId, taskIndex, directory, ...runCtx }: StoryTaskArgs): Promise<string> {
+async function runStoryTask({ storyId, taskIndex, directory, ...runCtx }: StoryTaskWorkflowArgs): Promise<string> {
   const content = await readStoryFile(directory, storyId)
   if (!content) return `Error: story "${storyId}" not found. Use workflow_status to list available stories.`
 
@@ -77,11 +79,11 @@ async function runStoryTask({ storyId, taskIndex, directory, ...runCtx }: StoryT
 
   if ("error" in target) return target.error
 
-  const conventions = await readDoc(directory, "ai-artifacts/conventions.md")
+  const conventions = await readDoc(directory, Paths.CONVENTIONS)
   const isLast = tasks.filter((t) => !t.done).length === 1
   const summary = await runDevAgentSession(
     { ...runCtx, directory },
-    "dev",
+    AgentRole.DEV,
     buildPrompt(target, tasks.length, isLast, content, conventions),
   )
 

@@ -1,11 +1,11 @@
 import { tool } from "@opencode-ai/plugin"
-import { rm } from "node:fs/promises"
-import { join } from "node:path"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
 import { withSession } from "../session/context.ts"
 import { runAgentSession } from "../session/agent.ts"
-import { readDoc, writeDoc } from "../storage/docs.ts"
 import { slugify } from "../parsers/slugify.ts"
+import { Paths } from "../constants/paths.ts"
+import { AgentRole } from "../agents/roles.ts"
+import { loadPreview, saveFiles, cleanPreview } from "../workflows/preview-save.ts"
 
 // ─── Tool factories ───────────────────────────────────────────────────────────
 
@@ -39,12 +39,12 @@ export function createReviewSaveTool(ctx: WorkflowCtx) {
 
 // ─── Workflow implementation ──────────────────────────────────────────────────
 
-type ReviewArgs = WorkflowRunCtx & { scope?: string }
+type ReviewWorkflowArgs = WorkflowRunCtx & { scope?: string }
 
-async function generateReviewContent(args: ReviewArgs) {
+async function generateReviewContent(args: ReviewWorkflowArgs) {
   const { scope, directory, ...runCtx } = args
 
-  const analysis = await runAgentSession({ ...runCtx, directory }, "analyst", `
+  const analysis = await runAgentSession({ ...runCtx, directory }, AgentRole.ANALYST, `
 Perform a deep technical analysis of the following code scope.
 ${scope ? `Scope: ${scope}` : "Scope: the current git diff / recent changes"}
 
@@ -59,7 +59,7 @@ Look for:
 Be thorough and methodical. List all findings with file references.
 `.trim())
 
-  const review = await runAgentSession({ ...runCtx, directory }, "reviewer", `
+  const review = await runAgentSession({ ...runCtx, directory }, AgentRole.REVIEWER, `
 Based on this technical analysis, write a structured code review report.
 
 Analysis:
@@ -77,16 +77,18 @@ Format the report with:
   return { analysis, review }
 }
 
-async function runReviewPreview(args: ReviewArgs): Promise<string> {
+async function runReviewPreview(args: ReviewWorkflowArgs): Promise<string> {
   const { scope, directory } = args
   const scopeLabel = scope ?? "full diff"
   const slug = slugify(scope ?? "full-diff")
-  const previewDir = `ai-artifacts/.previews/review-${slug}`
+  const previewDir = Paths.reviewPreviewDir(slug)
 
   const { analysis, review } = await generateReviewContent(args)
 
-  await writeDoc(directory, `${previewDir}/analysis.md`, analysis)
-  await writeDoc(directory, `${previewDir}/review.md`, review)
+  await saveFiles(directory, {
+    [`${previewDir}/analysis.md`]: analysis,
+    [`${previewDir}/review.md`]: review,
+  })
 
   return [
     `# Preview ready — Code Review: ${scopeLabel}`,
@@ -99,23 +101,25 @@ async function runReviewPreview(args: ReviewArgs): Promise<string> {
   ].join("\n")
 }
 
-async function runReviewSave(args: ReviewArgs): Promise<string> {
+async function runReviewSave(args: ReviewWorkflowArgs): Promise<string> {
   const { scope, directory } = args
   const scopeLabel = scope ?? "full diff"
   const slug = slugify(scope ?? "full-diff")
-  const previewDir = `ai-artifacts/.previews/review-${slug}`
-  const docsDir = `ai-artifacts/planning-artifacts/review-${slug}`
+  const previewDir = Paths.reviewPreviewDir(slug)
+  const docsDir = Paths.reviewDocsDir(slug)
 
-  const previewAnalysis = await readDoc(directory, `${previewDir}/analysis.md`)
-  const previewReview = await readDoc(directory, `${previewDir}/review.md`)
-  const hasPreview = !!previewAnalysis && !!previewReview
+  const preview = await loadPreview(directory, {
+    analysis: `${previewDir}/analysis.md`,
+    review: `${previewDir}/review.md`,
+  })
+  const hasPreview = preview !== null
 
   let analysis: string
   let review: string
 
   if (hasPreview) {
-    analysis = previewAnalysis
-    review = previewReview
+    analysis = preview.analysis
+    review = preview.review
   } else {
     const generated = await generateReviewContent(args)
     analysis = generated.analysis
@@ -127,14 +131,15 @@ async function runReviewSave(args: ReviewArgs): Promise<string> {
   lines.push(`> Started at ${new Date().toISOString()}\n`)
   if (hasPreview) lines.push(`> Loaded from preview (including any edits you made).\n`)
 
-  const analysisPath = await writeDoc(directory, `${docsDir}/ANALYSIS.md`, analysis)
+  const [analysisPath, reviewPath] = await saveFiles(directory, {
+    [`${docsDir}/ANALYSIS.md`]: analysis,
+    [`${docsDir}/REVIEW.md`]: review,
+  })
   lines.push(`   ✓ Analysis written → ${analysisPath}`)
-
-  const reviewPath = await writeDoc(directory, `${docsDir}/REVIEW.md`, review)
   lines.push(`   ✓ Review written → ${reviewPath}`)
 
   if (hasPreview) {
-    await rm(join(directory, previewDir), { recursive: true, force: true })
+    await cleanPreview(directory, previewDir)
     lines.push(`   ✓ Preview cleaned up`)
   }
 

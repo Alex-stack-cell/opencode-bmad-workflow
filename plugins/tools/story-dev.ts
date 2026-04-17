@@ -8,6 +8,8 @@ import { readDoc } from "../storage/docs.ts"
 import { writeProgressFile, clearProgressFile } from "../storage/progress.ts"
 import { patchStoryStatusInYaml } from "../parsers/sprint.ts"
 import { allTasksDone, parseUncheckedTopLevelTasks, markFirstUncheckedTaskDone } from "../parsers/tasks.ts"
+import { Paths } from "../constants/paths.ts"
+import { AgentRole } from "../agents/roles.ts"
 
 // ─── Tool factory ─────────────────────────────────────────────────────────────
 
@@ -25,9 +27,9 @@ export function createStoryDevTool(ctx: WorkflowCtx) {
 
 // ─── Workflow implementation ──────────────────────────────────────────────────
 
-type StoryDevArgs = WorkflowRunCtx & { storyId: string }
+type StoryDevWorkflowArgs = WorkflowRunCtx & { storyId: string }
 
-async function runStoryDev(args: StoryDevArgs): Promise<string> {
+async function runStoryDev(args: StoryDevWorkflowArgs): Promise<string> {
   const { storyId, directory, ...runCtx } = args
 
   const storyContent = await readStoryFile(directory, storyId)
@@ -50,7 +52,7 @@ async function runStoryDev(args: StoryDevArgs): Promise<string> {
     if (patched !== yaml) await writeSprintStatus(directory, patched)
   }
 
-  const conventions = await readDoc(directory, "ai-artifacts/conventions.md")
+  const conventions = await readDoc(directory, Paths.CONVENTIONS)
   const tasks = parseUncheckedTopLevelTasks(storyContent)
   const taskSummaries: string[] = []
 
@@ -84,7 +86,7 @@ async function runStoryDev(args: StoryDevArgs): Promise<string> {
 
     const currentStory = (await readStoryFile(directory, storyId)) || storyContent
 
-    const summary = await runDevAgentSession({ ...runCtx, directory }, "dev", `
+    const summary = await runDevAgentSession({ ...runCtx, directory }, AgentRole.DEV, `
 You are implementing a BMAD user story. Implement ONLY the single task described below — do not implement other tasks.
 
 ## Task to implement (task ${i + 1} of ${tasks.length})

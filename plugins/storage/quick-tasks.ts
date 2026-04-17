@@ -1,12 +1,10 @@
 import { readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-
-const LOG_PATH = "ai-artifacts/quick-tasks-log.yaml"
+import { Paths } from "../constants/paths.ts"
 
 export async function readQuickTasksLog(directory: string): Promise<string> {
-  const path = join(directory, LOG_PATH)
   try {
-    return await readFile(path, "utf-8")
+    return await readFile(join(directory, Paths.QUICK_TASKS_LOG), "utf-8")
   } catch {
     return ""
   }
@@ -25,7 +23,7 @@ export async function appendQuickTask(
   status: "done" | "escalated",
   summary: string,
 ): Promise<void> {
-  const path = join(directory, LOG_PATH)
+  const path = join(directory, Paths.QUICK_TASKS_LOG)
   const existing = await readQuickTasksLog(directory)
   const date = new Date().toISOString().split("T")[0]
 

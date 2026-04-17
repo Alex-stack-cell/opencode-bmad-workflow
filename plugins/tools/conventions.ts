@@ -3,8 +3,8 @@ import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
 import { withSession } from "../session/context.ts"
 import { runAgentSession } from "../session/agent.ts"
 import { readDoc, writeDoc } from "../storage/docs.ts"
-
-const CONVENTIONS_PATH = "ai-artifacts/conventions.md"
+import { Paths } from "../constants/paths.ts"
+import { AgentRole } from "../agents/roles.ts"
 
 // ─── Tool factory ─────────────────────────────────────────────────────────────
 
@@ -22,9 +22,9 @@ export function createConventionsTool(ctx: WorkflowCtx) {
 async function runConventions(runCtx: WorkflowRunCtx): Promise<string> {
   const { directory } = runCtx
 
-  const existing = await readDoc(directory, CONVENTIONS_PATH)
+  const existing = await readDoc(directory, Paths.CONVENTIONS)
 
-  const conventions = await runAgentSession(runCtx, "architect", `
+  const conventions = await runAgentSession(runCtx, AgentRole.ARCHITECT, `
 Analyze this codebase and extract the development conventions the team follows.
 
 ${existing ? `An existing conventions file is present — update and improve it rather than starting from scratch:\n\n${existing}\n\n---\n` : ""}
@@ -53,14 +53,14 @@ Keep each rule short and concrete. Skip sections that are not applicable.
 Do NOT invent rules that are not observable in the codebase.
 `.trim())
 
-  const path = await writeDoc(directory, CONVENTIONS_PATH, conventions)
+  const path = await writeDoc(directory, Paths.CONVENTIONS, conventions)
 
   return [
     `# Workflow: Conventions generated`,
     ``,
     `   ✓ Written → ${path}`,
     ``,
-    `Open \`${CONVENTIONS_PATH}\` and edit freely — add, remove, or refine any rule.`,
+    `Open \`${Paths.CONVENTIONS}\` and edit freely — add, remove, or refine any rule.`,
     `This file will be automatically injected into all implementation workflows.`,
     ``,
     `Re-run \`workflow_conventions\` at any time to refresh from the codebase.`,

@@ -1,12 +1,13 @@
 import { tool } from "@opencode-ai/plugin"
-import { rm } from "node:fs/promises"
-import { join } from "node:path"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
 import { withSession } from "../session/context.ts"
 import { runAgentSession } from "../session/agent.ts"
-import { readDoc, writeDoc } from "../storage/docs.ts"
+import { readDoc } from "../storage/docs.ts"
 import { readSprintStatus, writeSprintStatus } from "../storage/sprint.ts"
 import { slugify } from "../parsers/slugify.ts"
+import { Paths } from "../constants/paths.ts"
+import { AgentRole } from "../agents/roles.ts"
+import { loadPreview, saveFiles, cleanPreview } from "../workflows/preview-save.ts"
 
 // ─── Tool factories ───────────────────────────────────────────────────────────
 
@@ -44,12 +45,12 @@ export function createEpicSaveTool(ctx: WorkflowCtx) {
 
 // ─── Workflow implementations ─────────────────────────────────────────────────
 
-type EpicArgs = WorkflowRunCtx & { epicName: string; epicGoal: string; priority: "HIGH" | "MEDIUM" | "LOW" }
+type EpicWorkflowArgs = WorkflowRunCtx & { epicName: string; epicGoal: string; priority: "HIGH" | "MEDIUM" | "LOW" }
 
-async function generateEpicContent(args: EpicArgs) {
+async function generateEpicContent(args: EpicWorkflowArgs) {
   const { epicName, epicGoal, priority, directory, ...runCtx } = args
 
-  const epicDef = await runAgentSession({ ...runCtx, directory }, "pm", `
+  const epicDef = await runAgentSession({ ...runCtx, directory }, AgentRole.PM, `
 Define a high-level epic using BMAD methodology.
 
 Epic name: ${epicName}
@@ -65,8 +66,8 @@ Include:
 - Priority: ${priority} (set by the user — do not change this)
 `.trim())
 
-  const existingOverview = await readDoc(directory, "docs/OVERVIEW.md")
-  const overviewContent = existingOverview ? null : await runAgentSession({ ...runCtx, directory }, "pm", `
+  const existingOverview = await readDoc(directory, Paths.OVERVIEW)
+  const overviewContent = existingOverview ? null : await runAgentSession({ ...runCtx, directory }, AgentRole.PM, `
 Create a concise project overview document based on the codebase context.
 
 Include:
@@ -79,8 +80,8 @@ Do NOT include epics, roadmap, or planning information — that belongs in ROADM
 Keep it stable: this document should rarely need to change.
 `.trim())
 
-  const existingRoadmap = await readDoc(directory, "docs/ROADMAP.md")
-  const updatedRoadmap = await runAgentSession({ ...runCtx, directory }, "pm", `
+  const existingRoadmap = await readDoc(directory, Paths.ROADMAP)
+  const updatedRoadmap = await runAgentSession({ ...runCtx, directory }, AgentRole.PM, `
 Update the project roadmap to include this new epic.
 
 ${existingRoadmap
@@ -98,16 +99,19 @@ Format:
   return { epicDef, overviewContent, updatedRoadmap, existingRoadmap }
 }
 
-async function runEpicPreview(args: EpicArgs): Promise<string> {
+async function runEpicPreview(args: EpicWorkflowArgs): Promise<string> {
   const { epicName, directory } = args
   const slug = slugify(epicName)
-  const previewDir = `ai-artifacts/.previews/epic-${slug}`
+  const previewDir = Paths.epicPreviewDir(slug)
 
   const { epicDef, overviewContent, updatedRoadmap, existingRoadmap } = await generateEpicContent(args)
 
-  await writeDoc(directory, `${previewDir}/epic.md`, epicDef)
-  if (overviewContent) await writeDoc(directory, `${previewDir}/overview.md`, overviewContent)
-  await writeDoc(directory, `${previewDir}/roadmap.md`, updatedRoadmap)
+  const filesToSave: Record<string, string> = {
+    [`${previewDir}/epic.md`]: epicDef,
+    [`${previewDir}/roadmap.md`]: updatedRoadmap,
+  }
+  if (overviewContent) filesToSave[`${previewDir}/overview.md`] = overviewContent
+  await saveFiles(directory, filesToSave)
 
   const files = [
     `  - ${previewDir}/epic.md → ai-artifacts/planning-artifacts/epic-[n]-${slug}.md`,
@@ -126,24 +130,26 @@ async function runEpicPreview(args: EpicArgs): Promise<string> {
   ].join("\n")
 }
 
-async function runEpicSave(args: EpicArgs): Promise<string> {
+async function runEpicSave(args: EpicWorkflowArgs): Promise<string> {
   const { epicName, epicGoal, priority, directory, ...runCtx } = args
   const slug = slugify(epicName)
-  const previewDir = `ai-artifacts/.previews/epic-${slug}`
+  const previewDir = Paths.epicPreviewDir(slug)
 
-  const previewEpic = await readDoc(directory, `${previewDir}/epic.md`)
-  const previewRoadmap = await readDoc(directory, `${previewDir}/roadmap.md`)
-  const previewOverview = await readDoc(directory, `${previewDir}/overview.md`)
-  const hasPreview = !!previewEpic && !!previewRoadmap
+  const preview = await loadPreview(directory, {
+    epicDef: `${previewDir}/epic.md`,
+    updatedRoadmap: `${previewDir}/roadmap.md`,
+  })
+  const hasPreview = preview !== null
+  const optionalOverview = hasPreview ? await readDoc(directory, `${previewDir}/overview.md`) || null : null
 
   let epicDef: string
   let overviewContent: string | null
   let updatedRoadmap: string
 
   if (hasPreview) {
-    epicDef = previewEpic
-    overviewContent = previewOverview || null
-    updatedRoadmap = previewRoadmap
+    epicDef = preview.epicDef
+    overviewContent = optionalOverview
+    updatedRoadmap = preview.updatedRoadmap
   } else {
     const generated = await generateEpicContent({ ...runCtx, directory, epicName, epicGoal, priority })
     epicDef = generated.epicDef
@@ -152,7 +158,7 @@ async function runEpicSave(args: EpicArgs): Promise<string> {
   }
 
   const existingStatus = await readSprintStatus(directory)
-  const raw = await runAgentSession({ ...runCtx, directory }, "pm", `
+  const raw = await runAgentSession({ ...runCtx, directory }, AgentRole.PM, `
 Update this sprint-status.yaml to add a new epic entry, then return the result as JSON.
 
 ${existingStatus
@@ -192,22 +198,22 @@ epics:
   lines.push(`# Workflow: Epic — ${epicName}`)
   if (hasPreview) lines.push(`> Loaded from preview (including any edits you made).\n`)
 
-  const epicFilePath = await writeDoc(directory, `ai-artifacts/planning-artifacts/epic-${epicId}-${slug}.md`, epicDef)
+  const [epicFilePath] = await saveFiles(directory, { [Paths.epicFile(epicId, slug)]: epicDef })
   lines.push(`   ✓ Epic written → ${epicFilePath}`)
 
   if (overviewContent) {
-    const overviewFilePath = await writeDoc(directory, "docs/OVERVIEW.md", overviewContent)
+    const [overviewFilePath] = await saveFiles(directory, { [Paths.OVERVIEW]: overviewContent })
     lines.push(`   ✓ Overview created → ${overviewFilePath}`)
   }
 
-  const roadmapFilePath = await writeDoc(directory, "docs/ROADMAP.md", updatedRoadmap)
+  const [roadmapFilePath] = await saveFiles(directory, { [Paths.ROADMAP]: updatedRoadmap })
   lines.push(`   ✓ Roadmap updated → ${roadmapFilePath}`)
 
   const statusPath = await writeSprintStatus(directory, updatedStatus)
   lines.push(`   ✓ Sprint status updated → ${statusPath}`)
 
   if (hasPreview) {
-    await rm(join(directory, previewDir), { recursive: true, force: true })
+    await cleanPreview(directory, previewDir)
     lines.push(`   ✓ Preview cleaned up`)
   }
 

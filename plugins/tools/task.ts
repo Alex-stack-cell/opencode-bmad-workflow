@@ -4,6 +4,8 @@ import { withSession } from "../session/context.ts"
 import { runDevAgentSession } from "../session/agent.ts"
 import { readDoc } from "../storage/docs.ts"
 import { readQuickTasksLog, generateTaskId, appendQuickTask } from "../storage/quick-tasks.ts"
+import { Paths } from "../constants/paths.ts"
+import { AgentRole } from "../agents/roles.ts"
 
 // ─── Tool factory ─────────────────────────────────────────────────────────────
 
@@ -22,7 +24,7 @@ export function createTaskTool(ctx: WorkflowCtx) {
 
 // ─── Workflow implementation ──────────────────────────────────────────────────
 
-type TaskArgs = WorkflowRunCtx & { description: string }
+type QuickTaskWorkflowArgs = WorkflowRunCtx & { description: string }
 
 function evaluateEscalation(description: string): "simple" | "warn" | "escalate" {
   const text = description.toLowerCase()
@@ -49,7 +51,7 @@ function evaluateEscalation(description: string): "simple" | "warn" | "escalate"
   return "simple"
 }
 
-async function runTask(args: TaskArgs): Promise<string> {
+async function runTask(args: QuickTaskWorkflowArgs): Promise<string> {
   const { description, directory, ...runCtx } = args
 
   const existingLog = await readQuickTasksLog(directory)
@@ -60,33 +62,33 @@ async function runTask(args: TaskArgs): Promise<string> {
   if (level === "escalate") {
     await appendQuickTask(directory, taskId, description, "escalated", "Escalated to full story workflow")
     return [
-      `# Quick Task ${taskId} — Escalation recommandée`,
+      `# Quick Task ${taskId} — Escalation recommended`,
       ``,
-      `Cette tâche semble trop complexe pour un quick task (plusieurs composants, scope système ou multi-couche).`,
+      `This task seems too complex for a quick task (multiple components, system-level or multi-layer scope).`,
       ``,
-      `**Recommandation :** utilise \`/workflow-story\` pour créer une story complète avec AC et plan d'implémentation.`,
+      `**Recommendation:** use \`/workflow-story\` to create a full story with AC and an implementation plan.`,
       ``,
-      `Si tu veux quand même l'exécuter directement, relance avec une description plus précise et ciblée.`,
+      `If you still want to run it directly, re-run with a more precise and targeted description.`,
     ].join("\n")
   }
 
   if (level === "warn") {
     return [
-      `# Quick Task ${taskId} — Attention`,
+      `# Quick Task ${taskId} — Warning`,
       ``,
-      `Cette tâche pourrait être plus complexe que prévu (plusieurs signaux de complexité détectés).`,
+      `This task might be more complex than expected (multiple complexity signals detected).`,
       ``,
-      `**Options :**`,
-      `- Continue avec \`workflow_task_confirm\` si tu es sûr que c'est simple`,
-      `- Utilise \`/workflow-story\` pour un plan plus structuré`,
+      `**Options:**`,
+      `- Continue with \`workflow_task\` if you are sure it is simple`,
+      `- Use \`/workflow-story\` for a more structured plan`,
       ``,
-      `> Tâche : ${description}`,
+      `> Task: ${description}`,
     ].join("\n")
   }
 
-  const conventions = await readDoc(directory, "ai-artifacts/conventions.md")
+  const conventions = await readDoc(directory, Paths.CONVENTIONS)
 
-  const summary = await runDevAgentSession({ ...runCtx, directory }, "dev", `
+  const summary = await runDevAgentSession({ ...runCtx, directory }, AgentRole.DEV, `
 You are implementing a quick fix or small feature directly. No story file exists — work from the description below.
 
 ## Task
@@ -104,15 +106,15 @@ Do NOT create any story files or update sprint-status.yaml.
   await appendQuickTask(directory, taskId, description, "done", summary)
 
   return [
-    `# Quick Task ${taskId} — Terminé`,
+    `# Quick Task ${taskId} — Done`,
     ``,
-    `## Ce qui a été fait`,
+    `## What was done`,
     summary,
     ``,
     `## Logged`,
     `  ✓ ai-artifacts/quick-tasks-log.yaml → ${taskId}`,
     ``,
-    `Si le scope a grandi, utilise \`/workflow-story\` pour formaliser en story.`,
-    `Pour une revue de code : \`/workflow-review\`.`,
+    `If the scope grew, use \`/workflow-story\` to formalize it as a story.`,
+    `For a code review: \`/workflow-review\`.`,
   ].join("\n")
 }

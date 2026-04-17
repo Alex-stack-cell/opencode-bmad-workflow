@@ -1,5 +1,6 @@
 import type { WorkflowRunCtx } from "../types/workflow.ts"
 import { waitForIdle } from "./polling.ts"
+import { type AgentRole } from "../agents/roles.ts"
 
 const DIRECT_OUTPUT_INSTRUCTION =
   "IMPORTANT: Respond with plain text only. Do NOT use any tools or function calls. Do NOT ask for confirmation, approval, or additional input from the user. Write the complete content directly and immediately.\n\n"
@@ -55,7 +56,7 @@ async function extractLastAssistantText(
 
 export async function runAgentSession(
   runCtx: WorkflowRunCtx,
-  agentName: string,
+  agentName: AgentRole,
   prompt: string,
 ): Promise<string> {
   const { client, directory, sessionId: parentSessionId, config } = runCtx
@@ -86,7 +87,7 @@ export async function runAgentSession(
 
 export async function runDevAgentSession(
   runCtx: WorkflowRunCtx,
-  agentName: string,
+  agentName: AgentRole,
   prompt: string,
 ): Promise<string> {
   const { client, directory, sessionId: parentSessionId, config } = runCtx

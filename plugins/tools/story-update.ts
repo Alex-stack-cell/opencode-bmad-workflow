@@ -38,9 +38,9 @@ export function createStoryUpdateTool(ctx: WorkflowCtx) {
 
 // ─── Workflow implementation ──────────────────────────────────────────────────
 
-type StoryUpdateArgs = WorkflowRunCtx & { storyId: string; status: StoryStatus; note?: string }
+type StoryUpdateWorkflowArgs = WorkflowRunCtx & { storyId: string; status: StoryStatus; note?: string }
 
-async function runStoryUpdate(args: StoryUpdateArgs): Promise<string> {
+async function runStoryUpdate(args: StoryUpdateWorkflowArgs): Promise<string> {
   const { storyId, status, note, directory } = args
 
   const yaml = await readSprintStatus(directory)
