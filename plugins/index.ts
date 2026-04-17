@@ -39,5 +39,4 @@ async function WorkflowPlugin(ctx: PluginCtx) {
   return { tool }
 }
 
-export { WorkflowPlugin }
 export default WorkflowPlugin
