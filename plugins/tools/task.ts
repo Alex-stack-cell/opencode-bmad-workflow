@@ -1,10 +1,9 @@
 import { tool } from "@opencode-ai/plugin"
-import { readFile, writeFile } from "node:fs/promises"
-import { join } from "node:path"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
 import { withSession } from "../session/context.ts"
 import { runDevAgentSession } from "../session/agent.ts"
 import { readDoc } from "../storage/docs.ts"
+import { readQuickTasksLog, generateTaskId, appendQuickTask } from "../storage/quick-tasks.ts"
 
 // ─── Tool factory ─────────────────────────────────────────────────────────────
 
@@ -48,47 +47,6 @@ function evaluateEscalation(description: string): "simple" | "warn" | "escalate"
   if (escalationCount >= 3) return "escalate"
   if (escalationCount >= 2 && simplicityCount === 0) return "warn"
   return "simple"
-}
-
-async function readQuickTasksLog(directory: string): Promise<string> {
-  const path = join(directory, "ai-artifacts/quick-tasks-log.yaml")
-  try {
-    return await readFile(path, "utf-8")
-  } catch {
-    return ""
-  }
-}
-
-async function appendQuickTask(
-  directory: string,
-  taskId: string,
-  description: string,
-  status: "done" | "escalated",
-  summary: string,
-): Promise<void> {
-  const path = join(directory, "ai-artifacts/quick-tasks-log.yaml")
-  const existing = await readQuickTasksLog(directory)
-  const date = new Date().toISOString().split("T")[0]
-
-  const entry = [
-    `  - id: "${taskId}"`,
-    `    date: ${date}`,
-    `    description: "${description.replace(/"/g, "'")}"`,
-    `    status: ${status}`,
-    `    summary: "${summary.replace(/"/g, "'").replace(/\n/g, " ").slice(0, 200)}"`,
-  ].join("\n")
-
-  const updated = existing
-    ? existing.trimEnd() + "\n" + entry + "\n"
-    : `quick_tasks:\n${entry}\n`
-
-  await writeFile(path, updated, "utf-8")
-}
-
-function generateTaskId(existing: string): string {
-  const matches = [...existing.matchAll(/id: "QT-(\d+)"/g)]
-  const max = matches.reduce((acc, m) => Math.max(acc, parseInt(m[1], 10)), 0)
-  return `QT-${String(max + 1).padStart(3, "0")}`
 }
 
 async function runTask(args: TaskArgs): Promise<string> {

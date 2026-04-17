@@ -7,6 +7,7 @@ import { runAgentSession } from "../session/agent.ts"
 import { readDoc, writeDoc } from "../storage/docs.ts"
 import { readSprintStatus, writeSprintStatus } from "../storage/sprint.ts"
 import { slugify } from "../parsers/slugify.ts"
+import { computeNextStoryNum, appendStoryToYaml } from "../parsers/sprint.ts"
 
 // ─── Tool factories ───────────────────────────────────────────────────────────
 
@@ -147,63 +148,6 @@ async function runStoryPreview(args: StoryArgs): Promise<string> {
     ``,
     `When ready, call \`workflow_story_save\` with the same arguments to write to its final location.`,
   ].join("\n")
-}
-
-function computeNextStoryNum(yaml: string, epicId: number): number {
-  if (!yaml) return 1
-  const nums = [...yaml.matchAll(/id:\s*"(\d+)\.(\d+)"/g)]
-    .filter(([, eId]) => Number(eId) === epicId)
-    .map(([, , sNum]) => Number(sNum))
-  return nums.length > 0 ? Math.max(...nums) + 1 : 1
-}
-
-function appendStoryToYaml(yaml: string, epicId: number, storyId: string, title: string, slug: string): string {
-  const newEntry = [
-    `      - id: "${storyId}"`,
-    `        title: "${title}"`,
-    `        status: ready-for-dev`,
-    `        parent: ${epicId}`,
-    `        file: implementation-artifacts/stories/${epicId}-${storyId.split(".")[1]}-${slug}.md`,
-  ].join("\n")
-
-  if (!yaml) {
-    return [
-      `epics:`,
-      `  - id: ${epicId}`,
-      `    name: ""`,
-      `    status: planned`,
-      `    priority: HIGH`,
-      `    goal: ""`,
-      `    stories:`,
-      newEntry,
-    ].join("\n") + "\n"
-  }
-
-  const lines = yaml.split("\n")
-  let inTargetEpic = false
-  let lastStoryLineIdx = -1
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    if (/^\s*-\s+id:\s+\d+/.test(line)) {
-      inTargetEpic = line.includes(`id: ${epicId}`) || line.includes(`id: "${epicId}"`)
-    }
-    if (inTargetEpic && /^\s*-\s+id:\s+"[\d.]+"|^\s*stories:/.test(line)) {
-      lastStoryLineIdx = i
-    }
-  }
-
-  if (lastStoryLineIdx === -1) return yaml + "\n" + newEntry + "\n"
-
-  let insertIdx = lastStoryLineIdx + 1
-  while (insertIdx < lines.length) {
-    const l = lines[insertIdx]
-    if (/^\s{2}-\s+id:\s+\d/.test(l) && !l.includes(`id: "${epicId}`)) break
-    insertIdx++
-  }
-
-  lines.splice(insertIdx, 0, newEntry)
-  return lines.join("\n")
 }
 
 async function runStorySave(args: StoryArgs): Promise<string> {

@@ -25,3 +25,11 @@ export type WorkflowRunCtx = WorkflowCtx & {
   sessionId: string
   config: WorkflowConfig
 }
+
+/** Plugin-level context injected by OpenCode into the plugin factory. */
+export type PluginCtx = {
+  client: import("@opencode-ai/sdk").OpencodeClient
+  directory: string
+  worktree: string
+  project: { root: string }
+}

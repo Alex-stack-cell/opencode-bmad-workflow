@@ -10,15 +10,6 @@ import { slugify } from "../parsers/slugify.ts"
 
 // ─── Tool factories ───────────────────────────────────────────────────────────
 
-export function createStatusTool(ctx: WorkflowCtx) {
-  return tool({
-    description:
-      "Show the current project status: all epics and their stories with statuses from sprint-status.yaml. Use this to get an overview before planning a sprint or creating a story.",
-    args: {},
-    execute: () => withSession(ctx, runStatus),
-  })
-}
-
 export function createEpicPreviewTool(ctx: WorkflowCtx) {
   return tool({
     description:
@@ -52,23 +43,6 @@ export function createEpicSaveTool(ctx: WorkflowCtx) {
 }
 
 // ─── Workflow implementations ─────────────────────────────────────────────────
-
-async function runStatus(runCtx: WorkflowRunCtx): Promise<string> {
-  const { directory } = runCtx
-  const yaml = await readSprintStatus(directory)
-
-  if (!yaml) {
-    return [
-      "# Project Status",
-      "",
-      "No epics yet. Use `workflow_epic_preview` to create your first epic.",
-    ].join("\n")
-  }
-
-  return ["# Project Status\n", "```yaml", yaml, "```"].join("\n")
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 
 type EpicArgs = WorkflowRunCtx & { epicName: string; epicGoal: string; priority: "HIGH" | "MEDIUM" | "LOW" }
 

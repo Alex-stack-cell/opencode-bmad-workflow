@@ -1,6 +1,7 @@
-import { tool } from "@opencode-ai/plugin"
-import type { OpencodeClient } from "@opencode-ai/sdk"
-import { createStatusTool, createEpicPreviewTool, createEpicSaveTool } from "./tools/epic.ts"
+import type { PluginCtx, WorkflowCtx } from "./types/workflow.ts"
+import { createInitTool, createSetupTool } from "./tools/setup.ts"
+import { createStatusTool } from "./tools/status.ts"
+import { createEpicPreviewTool, createEpicSaveTool } from "./tools/epic.ts"
 import { createStoryPreviewTool, createStorySaveTool } from "./tools/story.ts"
 import { createStoryUpdateTool } from "./tools/story-update.ts"
 import { createStoryDevTool } from "./tools/story-dev.ts"
@@ -9,133 +10,35 @@ import { createSprintPreviewTool, createSprintSaveTool } from "./tools/sprint.ts
 import { createReviewPreviewTool, createReviewSaveTool } from "./tools/review.ts"
 import { createTaskTool } from "./tools/task.ts"
 import { createConventionsTool } from "./tools/conventions.ts"
-import {
-  metaStatus,
-  metaEpic,
-  metaStory,
-  metaStoryUpdate,
-  metaStoryDev,
-  metaStoryTasksList,
-  metaStoryTask,
-  metaSprint,
-  metaReview,
-  metaTask,
-  metaConventions,
-} from "./meta/index.ts"
-import { loadConfig, saveConfig } from "./storage/config.ts"
-import type { WorkflowConfig } from "./types/workflow.ts"
 
-type PluginCtx = {
-  client: OpencodeClient
-  directory: string
-  worktree: string
-  project: { root: string }
-}
+type ToolFactory = (ctx: WorkflowCtx) => unknown
 
-const allMeta = [
-  metaStatus,
-  metaEpic,
-  metaStory,
-  metaStoryUpdate,
-  metaStoryDev,
-  metaStoryTasksList,
-  metaStoryTask,
-  metaSprint,
-  metaReview,
-  metaTask,
-  metaConventions,
-]
-
-const SUPPORTED_LANGUAGES = ["en", "fr", "es", "de", "pt", "it", "ja", "zh"] as const
-
-function buildInitText(config: WorkflowConfig): string {
-  return [
-    "# BMAD Workflow — Quick Reference",
-    "",
-    "## Recommended cycle",
-    "",
-    "```",
-    "1. /workflow-setup         → set language (fr, en, es…)                    [once per project]",
-    "   /workflow-conventions  → generate ai-artifacts/conventions.md           [once per project, edit freely]",
-    "2. /workflow-epic          → define an epic (scope, goal, priority)         [once per epic]",
-    "3. /workflow-story         → create a BMAD story for that epic              [repeat per story]",
-    "4. /workflow-status        → verify stories appear as ready-for-dev",
-    "5. /workflow-sprint        → plan a sprint from your backlog                [once per sprint]",
-    "6. /workflow-story-tasks   → list tasks in a story with index and status",
-    "   /workflow-story-task   → implement one task at a time (safer, interruptible)",
-    "   /workflow-story-dev    → implement all tasks in one shot (legacy, less control)",
-    "   /workflow-task         → quick fix without epic/story (CSS, bug, tweak)  [shortcut]",
-    "7. /workflow-story-update  → mark as review, then done                      [repeat per story]",
-    "8. /workflow-review        → adversarial code review before closing          [optional]",
-    "```",
-    "",
-    "## Story lifecycle",
-    "",
-    "```",
-    "ready-for-dev → in-progress → review → done",
-    "                                     ↘ superseded / deferred",
-    "```",
-    "",
-    "## All tools",
-    "",
-    ...allMeta.map((m) => `- \`${m.name}\` — ${m.summary}`),
-    "",
-    "---",
-    `Language: \`${config.language}\` — use \`workflow_setup\` to change.`,
-    "Artifacts: `ai-artifacts/` — preview files in `ai-artifacts/.previews/` before every save.",
-  ].join("\n")
+const toolRegistry: Record<string, ToolFactory> = {
+  workflow_init: createInitTool,
+  workflow_setup: createSetupTool,
+  workflow_status: createStatusTool,
+  workflow_epic_preview: createEpicPreviewTool,
+  workflow_epic_save: createEpicSaveTool,
+  workflow_story_preview: createStoryPreviewTool,
+  workflow_story_save: createStorySaveTool,
+  workflow_story_update: createStoryUpdateTool,
+  workflow_story_dev: createStoryDevTool,
+  workflow_story_tasks: createStoryTasksListTool,
+  workflow_story_task: createStoryTaskTool,
+  workflow_sprint_preview: createSprintPreviewTool,
+  workflow_sprint_save: createSprintSaveTool,
+  workflow_review_preview: createReviewPreviewTool,
+  workflow_review_save: createReviewSaveTool,
+  workflow_task: createTaskTool,
+  workflow_conventions: createConventionsTool,
 }
 
 async function WorkflowPlugin(ctx: PluginCtx) {
-  const { client, directory } = ctx
-  const wfCtx = { client, directory }
-
-  return {
-    tool: {
-      workflow_init: tool({
-        description: "List available BMAD automated workflows. Use this as a starting point to pick a workflow or continue manually.",
-        args: {},
-        async execute() {
-          const config = await loadConfig(directory)
-          return buildInitText(config)
-        },
-      }),
-      workflow_setup: tool({
-        description: "Configure workflow preferences for this project. Sets the language used for all generated documents.",
-        args: {
-          language: tool.schema
-            .enum(SUPPORTED_LANGUAGES)
-            .describe("Language code for generated documents. Supported: en, fr, es, de, pt, it, ja, zh."),
-        },
-        async execute(args) {
-          await saveConfig(directory, args.language)
-          return [
-            `# Workflow setup saved`,
-            ``,
-            `Language set to \`${args.language}\`.`,
-            `All documents generated by workflows will now be written in that language.`,
-            ``,
-            `Config saved to \`ai-artifacts/.workflow-config.json\`.`,
-          ].join("\n")
-        },
-      }),
-      workflow_status: createStatusTool(wfCtx),
-      workflow_epic_preview: createEpicPreviewTool(wfCtx),
-      workflow_epic_save: createEpicSaveTool(wfCtx),
-      workflow_story_preview: createStoryPreviewTool(wfCtx),
-      workflow_story_save: createStorySaveTool(wfCtx),
-      workflow_story_update: createStoryUpdateTool(wfCtx),
-      workflow_story_dev: createStoryDevTool(wfCtx),
-      workflow_story_tasks: createStoryTasksListTool(wfCtx),
-      workflow_story_task: createStoryTaskTool(wfCtx),
-      workflow_sprint_preview: createSprintPreviewTool(wfCtx),
-      workflow_sprint_save: createSprintSaveTool(wfCtx),
-      workflow_review_preview: createReviewPreviewTool(wfCtx),
-      workflow_review_save: createReviewSaveTool(wfCtx),
-      workflow_task: createTaskTool(wfCtx),
-      workflow_conventions: createConventionsTool(wfCtx),
-    },
-  }
+  const wfCtx: WorkflowCtx = { client: ctx.client, directory: ctx.directory }
+  const tool = Object.fromEntries(
+    Object.entries(toolRegistry).map(([name, factory]) => [name, factory(wfCtx)]),
+  )
+  return { tool }
 }
 
 export { WorkflowPlugin }

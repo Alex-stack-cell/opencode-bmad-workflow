@@ -70,3 +70,17 @@ export const metaConventions = {
   chain: "Architect (codebase analysis) → ai-artifacts/conventions.md",
   generates: "ai-artifacts/conventions.md",
 }
+
+export const allMeta = [
+  metaStatus,
+  metaEpic,
+  metaStory,
+  metaStoryUpdate,
+  metaStoryDev,
+  metaStoryTasksList,
+  metaStoryTask,
+  metaSprint,
+  metaReview,
+  metaTask,
+  metaConventions,
+]
