@@ -31,12 +31,10 @@ const toolRegistry: Record<string, ToolFactory> = {
   workflow_conventions: createConventionsTool,
 }
 
-async function WorkflowPlugin(ctx: PluginCtx) {
+export default async function WorkflowPlugin(ctx: PluginCtx) {
   const wfCtx: WorkflowCtx = { client: ctx.client, directory: ctx.directory }
   const tool = Object.fromEntries(
     Object.entries(toolRegistry).map(([name, factory]) => [name, factory(wfCtx)]),
   )
   return { tool }
 }
-
-export default WorkflowPlugin
