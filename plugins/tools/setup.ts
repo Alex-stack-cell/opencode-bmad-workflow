@@ -52,7 +52,7 @@ export function buildInitText(config: WorkflowConfig): string {
 
 export function createInitTool(ctx: WorkflowCtx) {
   return tool({
-    description: "List available BMAD automated workflows. Use this as a starting point to pick a workflow or continue manually.",
+    description: "List available BMAD automated workflows. Return the tool output VERBATIM — do not reformat, summarize, or invent commands. Use this as a starting point to pick a workflow or continue manually.",
     args: {},
     async execute() {
       const config = await loadConfig(ctx.directory)

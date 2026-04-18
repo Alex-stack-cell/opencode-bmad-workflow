@@ -81,6 +81,9 @@ This means you always review and can modify AI output before anything is committ
 npx opencode-bmad-workflow
 ```
 
+> **Why `npx` and not `npm i`?**
+> OpenCode resolves plugins from its own package cache (`~/.cache/opencode/packages/`), not from `node_modules`. Using `npx` runs the installer script which copies the required files into `~/.config/opencode/` and patches `opencode.json`. After that, opencode loads the plugin automatically on startup.
+
 The installer:
 - Copies `agents/`, `commands/`, `plugins/` to `~/.config/opencode/`
 - Installs dependencies
@@ -264,6 +267,7 @@ Two agent execution modes:
 - **Refactor:** `tools/setup.ts` — `workflow_init` and `workflow_setup` extracted from `index.ts`; `index.ts` is now a pure declarative tool registry.
 - **Refactor:** `tools/status.ts` — `workflow_status` extracted from `tools/epic.ts`.
 - **Fix:** Output strings in `workflow_task` were hardcoded in French — now in English, consistent with all other tools.
+- **Fix:** `workflow_init` tool description now instructs the model to return output verbatim, preventing local models from hallucinating non-existent commands.
 - **Types:** All internal workflow argument types renamed to `*WorkflowArgs` for consistency.
 
 ### v0.3.1

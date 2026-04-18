@@ -1,6 +1,6 @@
 {
   "name": "opencode-bmad-workflow",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "BMAD workflow plugin for opencode — automates epic, feature, sprint and code review workflows using specialized AI agents",
   "type": "module",
   "main": "dist/index.js",

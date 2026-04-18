@@ -54,10 +54,20 @@ async function extractLastAssistantText(
   return ""
 }
 
+/** Tools that are read-only/file-access — disable when the agent has all context inline. */
+const FILE_TOOLS_DISABLED: Record<string, boolean> = {
+  read: false,
+  glob: false,
+  grep: false,
+  task: false,
+  webfetch: false,
+}
+
 export async function runAgentSession(
   runCtx: WorkflowRunCtx,
   agentName: AgentRole,
   prompt: string,
+  opts: { disableFileTools?: boolean } = {},
 ): Promise<string> {
   const { client, directory, sessionId: parentSessionId, config } = runCtx
 
@@ -70,12 +80,15 @@ export async function runAgentSession(
 
   const sessionId = session.id
   const languageInstruction = buildLanguageInstruction(config.language)
+  const tools = opts.disableFileTools
+    ? { ...WORKFLOW_TOOLS_DISABLED, ...FILE_TOOLS_DISABLED }
+    : WORKFLOW_TOOLS_DISABLED
 
   await client.session.prompt({
     path: { id: sessionId },
     body: {
       agent: agentName,
-      tools: WORKFLOW_TOOLS_DISABLED,
+      tools,
       parts: [{ type: "text", text: DIRECT_OUTPUT_INSTRUCTION + languageInstruction + prompt }],
     },
     query: { directory },
