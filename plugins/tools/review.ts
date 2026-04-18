@@ -147,6 +147,8 @@ async function runReviewSave(args: ReviewWorkflowArgs): Promise<string> {
   lines.push(`Generated docs in \`${docsDir}/\`:`)
   lines.push(`  - ANALYSIS.md`)
   lines.push(`  - REVIEW.md`)
+  lines.push(``)
+  lines.push(`→ Run \`workflow_story_update\` with \`status: done\` to close the reviewed story.`)
 
   return lines.join("\n")
 }

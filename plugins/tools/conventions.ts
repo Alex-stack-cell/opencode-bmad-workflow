@@ -164,7 +164,8 @@ Do NOT invent rules that are not observable in the codebase.
     ``,
     `Open \`${Paths.CONVENTIONS}\` and edit freely — add, remove, or refine any rule.`,
     `This file will be automatically injected into all implementation workflows.`,
-    ``,
     `Re-run \`workflow_conventions\` at any time to refresh from the codebase.`,
+    ``,
+    `→ Run \`workflow_epic_preview\` to define your first epic.`,
   ].join("\n")
 }
