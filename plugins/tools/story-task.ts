@@ -1,16 +1,14 @@
 import { tool } from "@opencode-ai/plugin"
-import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
+import type { WorkflowCtx, WorkflowRunCtx, WorkflowConfig, DevPromptMode } from "../types/workflow.ts"
 import type { Task } from "../types/task.ts"
 import { withSession } from "../session/context.ts"
 import { runDevAgentSession } from "../session/agent.ts"
+import { buildDevTaskPrompt } from "../session/prompts.ts"
 import { readStoryFile, writeStoryFile } from "../storage/stories.ts"
 import { readDoc } from "../storage/docs.ts"
 import { parseTopLevelTasks, allTasksDone, markTaskDone } from "../parsers/tasks.ts"
-import { readSprintStatus, writeSprintStatus } from "../storage/sprint.ts"
-import { patchStoryStatusInYaml } from "../parsers/sprint.ts"
-import { patchStoryFileStatus } from "../parsers/stories.ts"
-import { Paths } from "../constants/paths.ts"
-import { AgentRole } from "../agents/roles.ts"
+import { shrinkStoryForTask, shrinkConventions, type ShrinkMode } from "../parsers/shrink.ts"
+import { checkPromptBudget } from "../parsers/tokens.ts"
 
 // ─── Tool: list ───────────────────────────────────────────────────────────────
 
@@ -64,9 +62,9 @@ export function createStoryTaskTool(ctx: WorkflowCtx) {
 
 // ─── Orchestration ────────────────────────────────────────────────────────────
 
-type StoryTaskWorkflowArgs = WorkflowRunCtx & { storyId: string; taskIndex?: number }
+type StoryTaskArgs = WorkflowRunCtx & { storyId: string; taskIndex?: number }
 
-async function runStoryTask({ storyId, taskIndex, directory, ...runCtx }: StoryTaskWorkflowArgs): Promise<string> {
+async function runStoryTask({ storyId, taskIndex, directory, ...runCtx }: StoryTaskArgs): Promise<string> {
   const content = await readStoryFile(directory, storyId)
   if (!content) return `Error: story "${storyId}" not found. Use workflow_status to list available stories.`
 
@@ -76,15 +74,30 @@ async function runStoryTask({ storyId, taskIndex, directory, ...runCtx }: StoryT
 
   const tasks = parseTopLevelTasks(content)
   const target = resolveTarget(tasks, taskIndex)
-
   if ("error" in target) return target.error
 
-  const conventions = await readDoc(directory, Paths.CONVENTIONS)
+  const conventions = (await readDoc(directory, "ai-artifacts/conventions.md")) || ""
   const isLast = tasks.filter((t) => !t.done).length === 1
+
+  const plan = buildDevPlan({
+    config: runCtx.config,
+    story: content,
+    conventions,
+    target,
+    totalTasks: tasks.length,
+    isLast,
+    directory,
+  })
+
+  if (!plan.budget.ok) {
+    return formatBudgetError(storyId, target, plan.budget, runCtx.config)
+  }
+
   const summary = await runDevAgentSession(
     { ...runCtx, directory },
-    AgentRole.DEV,
-    buildPrompt(target, tasks.length, isLast, content, conventions),
+    "dev",
+    plan.prompt,
+    { disableFileTools: runCtx.config.localModel },
   )
 
   const afterDev = await readStoryFile(directory, storyId)
@@ -93,30 +106,22 @@ async function runStoryTask({ storyId, taskIndex, directory, ...runCtx }: StoryT
   }
 
   const updated = await readStoryFile(directory, storyId)
-  const remaining = (updated?.match(/^- \[ \]/gim) ?? []).length
+  const remaining = (updated?.match(/^- \[ \]/gm) ?? []).length
 
-  const lines = [
+  return [
     `# Story ${storyId} — Task ${target.index} done`,
     "",
     `**Task:** ${target.label}`,
+    plan.shrinkNote,
     "",
     summary,
     "",
+    remaining > 0
+      ? `${remaining} task(s) remaining. Run \`workflow_story_task\` to continue, or \`workflow_story_tasks\` to pick by index.`
+      : `All tasks done! Run \`workflow_story_update\` with status \`review\`.`,
   ]
-
-  if (remaining === 0 && updated) {
-    const yaml = await readSprintStatus(directory)
-    if (yaml) {
-      await writeSprintStatus(directory, patchStoryStatusInYaml(yaml, storyId, "review"))
-    }
-    await writeStoryFile(directory, storyId, patchStoryFileStatus(updated, "review"))
-    lines.push(`✅ All tasks done — story ${storyId} automatically moved to \`review\`.`)
-    lines.push(`Run \`workflow_review\` to perform a code review before marking done.`)
-  } else {
-    lines.push(`${remaining} task(s) remaining. Run \`workflow_story_task\` to continue, or \`workflow_story_tasks\` to pick by index.`)
-  }
-
-  return lines.join("\n")
+    .filter(Boolean)
+    .join("\n")
 }
 
 function resolveTarget(tasks: Task[], taskIndex?: number): Task | { error: string } {
@@ -129,24 +134,97 @@ function resolveTarget(tasks: Task[], taskIndex?: number): Task | { error: strin
   return tasks.find((t) => !t.done) ?? { error: `All tasks are done. Run \`workflow_story_update\` to finalize.` }
 }
 
-function buildPrompt(target: Task, total: number, isLast: boolean, storyContent: string, conventions: string): string {
-  return `
-You are implementing task ${target.index} of ${total} from a BMAD story. Implement ONLY this task.
+// ─── Prompt plan (shared shrink + budget pipeline) ────────────────────────────
 
-## Task
-${target.label}
+export type DevPlanInput = {
+  config: WorkflowConfig
+  story: string
+  conventions: string
+  target: Task
+  totalTasks: number
+  isLast: boolean
+  directory: string
+}
 
-## Story context (AC, dev notes, patterns — do NOT implement other tasks)
-${storyContent}
-${conventions ? `\n## Project conventions\n${conventions}\n` : ""}
-## Instructions
-1. Read relevant files before making changes.
-2. Implement this task only, including its subtasks.
-3. ${isLast
-    ? `This is the last task. Update the \`## Dev Agent Record\` section: Agent Model Used, Completion Notes, Files Modified.`
-    : `Do NOT touch the Dev Agent Record — more tasks remain.`}
-4. Follow existing codebase patterns and the project conventions above. No unrelated changes.
+export type DevPlan = {
+  prompt: string
+  budget: ReturnType<typeof checkPromptBudget>
+  shrinkNote: string
+  mode: DevPromptMode
+}
 
-Summarize in 2–3 sentences what you implemented and which files were modified.
-`.trim()
+export function buildDevPlan(input: DevPlanInput): DevPlan {
+  const { config, story, conventions, target, totalTasks, isLast, directory } = input
+  const mode: DevPromptMode = config.localModel ? "local" : "frontier"
+
+  // Try configured shrink mode first; if over budget in local mode, retry aggressive.
+  const firstTry = renderAttempt({ story, conventions, target, totalTasks, isLast, directory, mode, shrinkMode: config.shrinkMode, forceShrink: config.localModel })
+  const firstBudget = checkPromptBudget(firstTry.prompt, config.contextBudget)
+
+  if (firstBudget.ok || !config.localModel || config.shrinkMode === "aggressive") {
+    return { prompt: firstTry.prompt, budget: firstBudget, shrinkNote: firstTry.note, mode }
+  }
+
+  const retry = renderAttempt({ story, conventions, target, totalTasks, isLast, directory, mode, shrinkMode: "aggressive", forceShrink: true })
+  const retryBudget = checkPromptBudget(retry.prompt, config.contextBudget)
+  return { prompt: retry.prompt, budget: retryBudget, shrinkNote: retry.note, mode }
+}
+
+type AttemptInput = {
+  story: string
+  conventions: string
+  target: Task
+  totalTasks: number
+  isLast: boolean
+  directory: string
+  mode: DevPromptMode
+  shrinkMode: ShrinkMode
+  forceShrink: boolean
+}
+
+function renderAttempt(input: AttemptInput): { prompt: string; note: string } {
+  const { story, conventions, target, totalTasks, isLast, directory, mode, shrinkMode, forceShrink } = input
+
+  const shrunk = forceShrink
+    ? shrinkStoryForTask({ story, taskLabel: target.label, taskIndex: target.index, isLast, mode: shrinkMode })
+    : { shrunk: story, keptAcIndices: [], devNotesKept: "all" as const }
+
+  const convs = forceShrink ? shrinkConventions({ conventions }) : conventions
+
+  const prompt = buildDevTaskPrompt({
+    taskLabel: target.label,
+    taskIndex: target.index,
+    totalTasks,
+    isLast,
+    story: shrunk.shrunk,
+    conventions: convs,
+    directory,
+    mode,
+  })
+
+  const note = forceShrink
+    ? `_Local mode: shrink=${shrinkMode}, ACs kept=${shrunk.keptAcIndices.length || "all"}, dev-notes=${shrunk.devNotesKept}._`
+    : ""
+
+  return { prompt, note }
+}
+
+function formatBudgetError(
+  storyId: string,
+  target: Task,
+  budget: ReturnType<typeof checkPromptBudget>,
+  config: WorkflowConfig,
+): string {
+  const pct = Math.round(budget.ratio * 100)
+  return [
+    `# Story ${storyId} — Task ${target.index} aborted (prompt over budget)`,
+    "",
+    `Estimated prompt size: **${budget.estimatedTokens} tokens** (${pct}% of ${config.contextBudget} budget).`,
+    `Soft cap: 60%. Even with aggressive shrinking the prompt is too large for this local model.`,
+    "",
+    `**Options:**`,
+    `- Raise \`contextBudget\` in \`ai-artifacts/.workflow-config.json\` if your model supports a larger window.`,
+    `- Split this task into smaller subtasks and run them individually.`,
+    `- Disable local mode (\`localModel: false\`) if you have access to a frontier model.`,
+  ].join("\n")
 }

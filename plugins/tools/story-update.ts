@@ -4,7 +4,7 @@ import type { StoryStatus } from "../types/story.ts"
 import { withSession } from "../session/context.ts"
 import { readSprintStatus, writeSprintStatus } from "../storage/sprint.ts"
 import { readStoryFile, writeStoryFile } from "../storage/stories.ts"
-import { patchStoryStatusInYaml, epicIdFromStoryId, getEpicStoryStatuses, patchEpicStatusInYaml } from "../parsers/sprint.ts"
+import { patchStoryStatusInYaml } from "../parsers/sprint.ts"
 import { patchStoryFileStatus } from "../parsers/stories.ts"
 
 const STORY_STATUSES = [
@@ -38,9 +38,9 @@ export function createStoryUpdateTool(ctx: WorkflowCtx) {
 
 // ─── Workflow implementation ──────────────────────────────────────────────────
 
-type StoryUpdateWorkflowArgs = WorkflowRunCtx & { storyId: string; status: StoryStatus; note?: string }
+type StoryUpdateArgs = WorkflowRunCtx & { storyId: string; status: StoryStatus; note?: string }
 
-async function runStoryUpdate(args: StoryUpdateWorkflowArgs): Promise<string> {
+async function runStoryUpdate(args: StoryUpdateArgs): Promise<string> {
   const { storyId, status, note, directory } = args
 
   const yaml = await readSprintStatus(directory)
@@ -82,20 +82,6 @@ async function runStoryUpdate(args: StoryUpdateWorkflowArgs): Promise<string> {
     lines.push(``)
     lines.push(`Run \`workflow_review_preview\` to perform a code review before marking done.`)
   } else if (status === "done") {
-    const epicId = epicIdFromStoryId(storyId)
-    const finalYaml = await readSprintStatus(directory)
-    if (finalYaml) {
-      const storyStatuses = getEpicStoryStatuses(finalYaml, epicId)
-      const allClosed = storyStatuses.length > 0 && storyStatuses.every((s) => s === "done" || s === "superseded" || s === "deferred")
-      if (allClosed) {
-        const epicPatched = patchEpicStatusInYaml(finalYaml, epicId, "done")
-        if (epicPatched !== finalYaml) {
-          await writeSprintStatus(directory, epicPatched)
-          lines.push(``)
-          lines.push(`✅ All stories in epic ${epicId} are done — epic automatically marked \`done\`.`)
-        }
-      }
-    }
     lines.push(``)
     lines.push(`Run \`workflow_status\` to see the updated project overview.`)
   }

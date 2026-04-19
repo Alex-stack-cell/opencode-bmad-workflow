@@ -71,6 +71,32 @@ This means you always review and can modify AI output before anything is committ
 
 > **Model requirement:** Agents run in child sessions and require a model that supports tool calling. Models like `deepseek-r1` do not support tools and will fail silently.
 
+### Running on local models (Qwen, DeepSeek-Coder, Llama, …)
+
+Small-context local models often loop infinitely on dev tasks: they exhaust their context window reading files and trigger a session compaction that erases their tool-call state. Enable **local-mode** to prevent this:
+
+```
+/workflow-setup local_model=true
+```
+
+What it does:
+
+- **Shrinks the story** before prompting — keeps only the targeted task, the ACs relevant to it, and the Dev Notes paragraphs sharing keywords with the task. Other tasks, unrelated ACs, and the Dev Agent Record (except on the last task) are dropped.
+- **Shrinks conventions** to ~500 tokens (first paragraph of each section).
+- **Disables file-read tools** (`read`, `glob`, `grep`, `webfetch`) in dev sessions — the agent must work from the context inlined in the prompt.
+- **Gates the prompt size** at 60% of `context_budget` (default 32000). If the prompt is too large even after aggressive shrinking, the workflow aborts with an actionable message instead of letting the model loop.
+
+Tune per model:
+
+```
+/workflow-setup local_model=true context_budget=32000 shrink_mode=balanced
+```
+
+- `context_budget`: your model's usable context window in tokens (Qwen2.5-Coder-14B at 32k, Qwen2.5-Coder-32B at 128k…).
+- `shrink_mode`: `aggressive` | `balanced` (default) | `conservative`. Aggressive prunes more ACs and Dev Notes paragraphs.
+
+Frontier models (Claude, GPT, Gemini) should leave `local_model` off — the default preserves the previous behavior exactly.
+
 ---
 
 ## Installation
@@ -209,17 +235,20 @@ plugins/
     index.ts                  # Tool descriptors (name, summary, chain, generates) + allMeta
   session/
     context.ts                # getCurrentSessionId, withSession
-    agent.ts                  # runAgentSession, runDevAgentSession
+    agent.ts                  # runAgentSession, runDevAgentSession, FILE_TOOLS_DISABLED
+    prompts.ts                # buildDevTaskPrompt, buildQuickTaskPrompt — mode-aware (local|frontier)
     polling.ts                # waitForIdle
   storage/
-    config.ts                 # Per-project language config
+    config.ts                 # loadConfig, saveConfig (accepts Partial<WorkflowConfig>)
     docs.ts                   # readDoc, writeDoc
     sprint.ts                 # readSprintStatus, writeSprintStatus
     stories.ts                # findStoryFile, readStoryFile, writeStoryFile
     progress.ts               # writeProgressFile, clearProgressFile
-    quick-tasks.ts            # readQuickTasksLog, appendQuickTask, generateTaskId
-  parsers/
+  parsers/                    # pure functions only, zero I/O, fully unit-tested
     slugify.ts                # slugify
+    sections.ts               # splitSectionsByH2, findSection, renderSection
+    tokens.ts                 # estimateTokens, checkPromptBudget
+    shrink.ts                 # shrinkStoryForTask, shrinkConventions (local-mode)
     sprint.ts                 # patchStoryStatusInYaml, computeNextStoryNum, appendStoryToYaml, …
     stories.ts                # patchStoryFileStatus
     tasks.ts                  # parseTopLevelTasks, allTasksDone, markTaskDone, …
@@ -242,7 +271,7 @@ plugins/
 - **Layered** — `session/` owns OpenCode API calls, `storage/` owns file I/O, `parsers/` owns pure transformations, `tools/` owns orchestration. No layer reaches into another's responsibility.
 - **Single source of truth** — all artifact paths live in `constants/paths.ts`; all agent role names live in `agents/roles.ts`. No magic strings scattered across the codebase.
 - **Shared preview/save pattern** — `workflows/preview-save.ts` centralizes the load-from-preview-or-generate logic used by all document-generating tools (epic, story, sprint, review).
-- **DRY** — `slugify`, `readDoc`, `withSession` are defined once, used everywhere.
+- **DRY** — `slugify`, `readDoc`, `withSession`, `buildDevTaskPrompt` are defined once, used everywhere.
 - **KISS** — YAML manipulation is delegated to the LLM (no YAML parser dependency). ID extraction uses a JSON envelope `{id, yaml}` for reliability with a graceful fallback.
 - **Preview/save** — no file is written to its final location without the user reviewing it first.
 - **Deterministic checkboxes** — task checkboxes `[x]` are marked programmatically after each dev session, never delegated to the agent.
@@ -258,6 +287,28 @@ Two agent execution modes:
 ---
 
 ## Changelog
+
+### v0.4.0
+- **New:** Local-model mode (`local_model: true`) — shrinks stories and conventions before prompting, disables file-read tools in dev sessions, and enforces a soft prompt-size cap. Eliminates the infinite-loop failure mode where small-context models exhaust their window reading files and trigger compaction. Configure via `/workflow-setup` or edit `ai-artifacts/.workflow-config.json` directly (`localModel`, `contextBudget`, `shrinkMode`).
+- **New:** `plugins/parsers/shrink.ts` — pure `shrinkStoryForTask` and `shrinkConventions`, deterministic heuristics, 15 unit tests.
+- **New:** `plugins/parsers/tokens.ts` — dependency-free token estimator and budget gate, 9 unit tests.
+- **New:** `plugins/parsers/sections.ts` — reusable Markdown H2 section splitter, 7 unit tests.
+- **New:** `plugins/session/prompts.ts` exports `buildDevTaskPrompt` and `buildQuickTaskPrompt` with explicit `local` vs `frontier` modes. Shared by `workflow_story_task`, `workflow_story_dev`, and `workflow_task` (DRY).
+- **New:** `buildDevPlan` in `tools/story-task.ts` — shared shrink → render → budget → aggressive-retry pipeline reused by `workflow_story_dev`.
+- **Change:** `saveConfig` accepts `Partial<WorkflowConfig>` and merges with the existing config on disk — existing config files pick up the new fields (`localModel`, `contextBudget`, `shrinkMode`) with safe defaults.
+- **Change:** `/workflow-setup` now accepts optional `local_model`, `context_budget`, `shrink_mode` args; calling it with no args prints the current config.
+- **Change:** `runAgentSession` and `runDevAgentSession` accept an optional `{ disableFileTools }` flag. Used automatically when `localModel` is true.
+- **Fix:** `meta/index.ts` now exports `allMeta` (referenced by `tools/setup.ts`, which is now wired into `index.ts`).
+- **Chore:** `bun test plugins/parsers` runs the pure-function test suite; wired into `prepublishOnly`.
+
+### v0.3.6
+- **Fix:** `workflow-story-task` and `workflow-story-tasks` commands now call their tool immediately when arguments are provided — fixes local models (Devstral Small) displaying the command file instead of executing.
+
+### v0.3.5
+- **Fix:** Dev agent now performs mandatory codebase discovery before writing code — reads existing models, enums, services, and jobs referenced in the task before implementing. Prevents hallucinated constants, wrong type comparisons, and unused imports.
+- **Refactor:** `session/prompts.ts` — `buildDevTaskPrompt` extracted as a shared builder used by both `workflow_story_task` and `workflow_story_dev`. Single source of truth for dev task prompts.
+
+### v0.3.4
 
 ### v0.3.2
 - **Refactor:** `constants/paths.ts` — all artifact and doc paths centralized, no more scattered hardcoded strings.

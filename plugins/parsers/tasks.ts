@@ -20,8 +20,8 @@ export function markTaskDone(content: string, taskIndex: number): string {
         inTarget = false
         return line
       }
-      if (inTarget && /^\s+- \[[ x]\]/i.test(line)) {
-        return line.replace(/- \[ \]/i, "- [x]")
+      if (inTarget && /^\s+- \[ \]/.test(line)) {
+        return line.replace(/- \[ \]/, "- [x]")
       }
       return line
     })
@@ -38,15 +38,15 @@ export function markFirstUncheckedTaskDone(content: string): string {
   return lines
     .map((line) => {
       if (/^- \[[ x]\]/i.test(line)) {
-        if (!inTarget && /^- \[ \]/i.test(line)) {
+        if (!inTarget && /^- \[ \]/.test(line)) {
           inTarget = true
-          return line.replace(/^- \[ \]/i, "- [x]")
+          return line.replace(/^- \[ \]/, "- [x]")
         }
         inTarget = false
         return line
       }
-      if (inTarget && /^\s+- \[[ x]\]/i.test(line)) {
-        return line.replace(/- \[ \]/i, "- [x]")
+      if (inTarget && /^\s+- \[ \]/.test(line)) {
+        return line.replace(/- \[ \]/, "- [x]")
       }
       return line
     })
@@ -59,21 +59,21 @@ export function parseTopLevelTasks(content: string): Task[] {
   for (const line of content.split("\n")) {
     if (/^- \[x\]/i.test(line)) {
       tasks.push({ index: ++i, done: true, label: line.replace(/^- \[x\]\s*/i, "").trim() })
-    } else if (/^- \[ \]/i.test(line)) {
-      tasks.push({ index: ++i, done: false, label: line.replace(/^- \[ \]\s*/i, "").trim() })
+    } else if (/^- \[ \]/.test(line)) {
+      tasks.push({ index: ++i, done: false, label: line.replace(/^- \[ \]\s*/, "").trim() })
     }
   }
   return tasks
 }
 
 export function allTasksDone(storyContent: string): boolean {
-  return !/^- \[ \]/im.test(storyContent)
+  return !storyContent.includes("- [ ]")
 }
 
 export function parseUncheckedTopLevelTasks(content: string): string[] {
   return content
     .split("\n")
-    .filter((line) => /^- \[ \]/i.test(line))
-    .map((line) => line.replace(/^- \[ \]\s*/i, "").trim())
+    .filter((line) => /^- \[ \]/.test(line))
+    .map((line) => line.replace(/^- \[ \]\s*/, "").trim())
     .filter(Boolean)
 }

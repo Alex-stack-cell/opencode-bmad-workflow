@@ -7,9 +7,8 @@ import { readStoryFile, writeStoryFile } from "../storage/stories.ts"
 import { readDoc } from "../storage/docs.ts"
 import { writeProgressFile, clearProgressFile } from "../storage/progress.ts"
 import { patchStoryStatusInYaml } from "../parsers/sprint.ts"
-import { allTasksDone, parseUncheckedTopLevelTasks, markFirstUncheckedTaskDone } from "../parsers/tasks.ts"
-import { Paths } from "../constants/paths.ts"
-import { AgentRole } from "../agents/roles.ts"
+import { allTasksDone, parseTopLevelTasks, markFirstUncheckedTaskDone } from "../parsers/tasks.ts"
+import { buildDevPlan } from "./story-task.ts"
 
 // ─── Tool factory ─────────────────────────────────────────────────────────────
 
@@ -27,9 +26,9 @@ export function createStoryDevTool(ctx: WorkflowCtx) {
 
 // ─── Workflow implementation ──────────────────────────────────────────────────
 
-type StoryDevWorkflowArgs = WorkflowRunCtx & { storyId: string }
+type StoryDevArgs = WorkflowRunCtx & { storyId: string }
 
-async function runStoryDev(args: StoryDevWorkflowArgs): Promise<string> {
+async function runStoryDev(args: StoryDevArgs): Promise<string> {
   const { storyId, directory, ...runCtx } = args
 
   const storyContent = await readStoryFile(directory, storyId)
@@ -52,11 +51,11 @@ async function runStoryDev(args: StoryDevWorkflowArgs): Promise<string> {
     if (patched !== yaml) await writeSprintStatus(directory, patched)
   }
 
-  const conventions = await readDoc(directory, Paths.CONVENTIONS)
-  const tasks = parseUncheckedTopLevelTasks(storyContent)
-  const taskSummaries: string[] = []
+  const conventions = (await readDoc(directory, "ai-artifacts/conventions.md")) || ""
+  const allTasks = parseTopLevelTasks(storyContent)
+  const unchecked = allTasks.filter((t) => !t.done)
 
-  if (tasks.length === 0) {
+  if (unchecked.length === 0) {
     return [
       `# Story ${storyId} — No unchecked tasks found`,
       ``,
@@ -64,55 +63,45 @@ async function runStoryDev(args: StoryDevWorkflowArgs): Promise<string> {
     ].join("\n")
   }
 
-  for (let i = 0; i < tasks.length; i++) {
-    const task = tasks[i]
+  const taskSummaries: string[] = []
+  const shrinkNotes: string[] = []
+
+  for (let i = 0; i < unchecked.length; i++) {
+    const target = unchecked[i]
+    const isLast = i === unchecked.length - 1
 
     await writeProgressFile(
       directory,
-      [
-        `# Dev Progress — Story ${storyId}`,
-        ``,
-        `**Task ${i + 1} / ${tasks.length}** — en cours`,
-        ``,
-        `> ${task}`,
-        ``,
-        `## Tâches complétées`,
-        ...taskSummaries.map((s, idx) => `- [x] Tâche ${idx + 1}: ${tasks[idx]}`),
-        ``,
-        `## En attente`,
-        ...tasks.slice(i).map((t, idx) => `- [ ] Tâche ${i + idx + 1}: ${t}`),
-      ].join("\n"),
+      renderProgress(storyId, i, unchecked.length, target.label, unchecked, taskSummaries),
     )
 
     const currentStory = (await readStoryFile(directory, storyId)) || storyContent
 
-    const summary = await runDevAgentSession({ ...runCtx, directory }, AgentRole.DEV, `
-You are implementing a BMAD user story. Implement ONLY the single task described below — do not implement other tasks.
+    const plan = buildDevPlan({
+      config: runCtx.config,
+      story: currentStory,
+      conventions,
+      target,
+      totalTasks: allTasks.length,
+      isLast,
+      directory,
+    })
 
-## Task to implement (task ${i + 1} of ${tasks.length})
+    if (!plan.budget.ok) {
+      await clearProgressFile(directory)
+      return formatBudgetAbort(storyId, target.label, plan.budget.estimatedTokens, runCtx.config.contextBudget, i)
+    }
 
-${task}
-
-## Full story context (for AC, dev notes, and patterns — do NOT implement other tasks)
-
-${currentStory}
-${conventions ? `\n## Project conventions\n${conventions}\n` : ""}
-## Instructions
-
-1. Read the task and the story context carefully.
-2. Implement this task only, including any subtasks listed under it.
-3. If this is the last task, also update the \`## Dev Agent Record\` section:
-   - **Agent Model Used**: your model name
-   - **Completion Notes**: brief summary, decisions, limitations
-   - **Files Modified**: every file created or modified across all tasks
-4. Follow existing codebase patterns and the project conventions above. Write tests for your implementation.
-
-When done, write 2–3 sentences summarizing what you implemented for this task.
-`.trim())
+    const summary = await runDevAgentSession(
+      { ...runCtx, directory },
+      "dev",
+      plan.prompt,
+      { disableFileTools: runCtx.config.localModel },
+    )
 
     taskSummaries.push(summary)
+    if (plan.shrinkNote) shrinkNotes.push(`Task ${target.index}: ${plan.shrinkNote}`)
 
-    // Programmatically mark the task and its subtasks done — don't rely on the agent
     const afterDev = await readStoryFile(directory, storyId)
     if (afterDev) {
       await writeStoryFile(directory, storyId, markFirstUncheckedTaskDone(afterDev))
@@ -127,24 +116,64 @@ When done, write 2–3 sentences summarizing what you implemented for this task.
   const lines = [
     `# Workflow: Story Dev — ${storyId}`,
     ``,
-    `## Implementation Summary (${tasks.length} tasks)`,
-    ...taskSummaries.map((s, i) => [``, `### Task ${i + 1}: ${tasks[i]}`, s].join("\n")),
+    `## Implementation Summary (${unchecked.length} tasks)`,
+    ...unchecked.map((t, i) => `\n### Task ${t.index}: ${t.label}\n${taskSummaries[i] ?? "(no summary)"}`),
     ``,
     `## Status`,
+    isDone ? `All tasks completed ✓` : `Some tasks may still be unchecked — check the story file.`,
+    ``,
+    isDone
+      ? `Run \`workflow_story_update\` with status \`review\` to request a code review.\nOr \`workflow_review_preview\` to run an automated review.`
+      : `Run \`workflow_story_dev\` again to continue implementation.`,
+    ``,
+    `sprint-status.yaml updated → story ${storyId} is now \`in-progress\``,
   ]
 
-  if (isDone) {
-    lines.push(`All tasks completed ✓`)
-    lines.push(``)
-    lines.push(`Run \`workflow_story_update\` with status \`review\` to request a code review.`)
-    lines.push(`Or \`workflow_review_preview\` to run an automated review.`)
-  } else {
-    lines.push(`Some tasks may still be unchecked — check the story file.`)
-    lines.push(`Run \`workflow_story_dev\` again to continue implementation.`)
+  if (shrinkNotes.length > 0) {
+    lines.push(``, `## Local-mode shrink report`, ...shrinkNotes)
   }
 
-  lines.push(``)
-  lines.push(`sprint-status.yaml updated → story ${storyId} is now \`in-progress\``)
-
   return lines.join("\n")
+}
+
+function renderProgress(
+  storyId: string,
+  currentIdx: number,
+  total: number,
+  currentLabel: string,
+  unchecked: ReadonlyArray<{ index: number; label: string }>,
+  completed: readonly string[],
+): string {
+  return [
+    `# Dev Progress — Story ${storyId}`,
+    ``,
+    `**Task ${currentIdx + 1} / ${total}** — in progress`,
+    ``,
+    `> ${currentLabel}`,
+    ``,
+    `## Completed`,
+    ...completed.map((_, idx) => `- [x] Task ${unchecked[idx].index}: ${unchecked[idx].label}`),
+    ``,
+    `## Pending`,
+    ...unchecked.slice(currentIdx).map((t) => `- [ ] Task ${t.index}: ${t.label}`),
+  ].join("\n")
+}
+
+function formatBudgetAbort(
+  storyId: string,
+  taskLabel: string,
+  estimated: number,
+  budget: number,
+  completedCount: number,
+): string {
+  return [
+    `# Story ${storyId} — Aborted (prompt over budget)`,
+    ``,
+    `Completed ${completedCount} task(s) before aborting.`,
+    ``,
+    `**Task over budget:** ${taskLabel}`,
+    `Estimated prompt: ${estimated} tokens (budget ${budget}, soft cap 60%).`,
+    ``,
+    `Split this task into smaller subtasks, raise \`contextBudget\`, or disable local mode, then re-run \`workflow_story_dev\`.`,
+  ].join("\n")
 }

@@ -1,7 +1,6 @@
-import type { PluginCtx, WorkflowCtx, ToolFactory } from "./types/workflow.ts"
+import type { OpencodeClient } from "@opencode-ai/sdk"
 import { createInitTool, createSetupTool } from "./tools/setup.ts"
-import { createStatusTool } from "./tools/status.ts"
-import { createEpicPreviewTool, createEpicSaveTool } from "./tools/epic.ts"
+import { createStatusTool, createEpicPreviewTool, createEpicSaveTool } from "./tools/epic.ts"
 import { createStoryPreviewTool, createStorySaveTool } from "./tools/story.ts"
 import { createStoryUpdateTool } from "./tools/story-update.ts"
 import { createStoryDevTool } from "./tools/story-dev.ts"
@@ -11,30 +10,39 @@ import { createReviewPreviewTool, createReviewSaveTool } from "./tools/review.ts
 import { createTaskTool } from "./tools/task.ts"
 import { createConventionsTool } from "./tools/conventions.ts"
 
-const toolRegistry: Record<string, ToolFactory> = {
-  workflow_init: createInitTool,
-  workflow_setup: createSetupTool,
-  workflow_status: createStatusTool,
-  workflow_epic_preview: createEpicPreviewTool,
-  workflow_epic_save: createEpicSaveTool,
-  workflow_story_preview: createStoryPreviewTool,
-  workflow_story_save: createStorySaveTool,
-  workflow_story_update: createStoryUpdateTool,
-  workflow_story_dev: createStoryDevTool,
-  workflow_story_tasks: createStoryTasksListTool,
-  workflow_story_task: createStoryTaskTool,
-  workflow_sprint_preview: createSprintPreviewTool,
-  workflow_sprint_save: createSprintSaveTool,
-  workflow_review_preview: createReviewPreviewTool,
-  workflow_review_save: createReviewSaveTool,
-  workflow_task: createTaskTool,
-  workflow_conventions: createConventionsTool,
+type PluginCtx = {
+  client: OpencodeClient
+  directory: string
+  worktree: string
+  project: { root: string }
 }
 
-export default async function WorkflowPlugin(ctx: PluginCtx) {
-  const wfCtx: WorkflowCtx = { client: ctx.client, directory: ctx.directory }
-  const tool = Object.fromEntries(
-    Object.entries(toolRegistry).map(([name, factory]) => [name, factory(wfCtx)]),
-  )
-  return { tool }
+async function WorkflowPlugin(ctx: PluginCtx) {
+  const { client, directory } = ctx
+  const wfCtx = { client, directory }
+
+  return {
+    tool: {
+      workflow_init: createInitTool(wfCtx),
+      workflow_setup: createSetupTool(wfCtx),
+      workflow_status: createStatusTool(wfCtx),
+      workflow_epic_preview: createEpicPreviewTool(wfCtx),
+      workflow_epic_save: createEpicSaveTool(wfCtx),
+      workflow_story_preview: createStoryPreviewTool(wfCtx),
+      workflow_story_save: createStorySaveTool(wfCtx),
+      workflow_story_update: createStoryUpdateTool(wfCtx),
+      workflow_story_dev: createStoryDevTool(wfCtx),
+      workflow_story_tasks: createStoryTasksListTool(wfCtx),
+      workflow_story_task: createStoryTaskTool(wfCtx),
+      workflow_sprint_preview: createSprintPreviewTool(wfCtx),
+      workflow_sprint_save: createSprintSaveTool(wfCtx),
+      workflow_review_preview: createReviewPreviewTool(wfCtx),
+      workflow_review_save: createReviewSaveTool(wfCtx),
+      workflow_task: createTaskTool(wfCtx),
+      workflow_conventions: createConventionsTool(wfCtx),
+    },
+  }
 }
+
+export { WorkflowPlugin }
+export default WorkflowPlugin

@@ -1,6 +1,5 @@
 import type { WorkflowRunCtx } from "../types/workflow.ts"
 import { waitForIdle } from "./polling.ts"
-import { type AgentRole } from "../agents/roles.ts"
 
 const DIRECT_OUTPUT_INSTRUCTION =
   "IMPORTANT: Respond with plain text only. Do NOT use any tools or function calls. Do NOT ask for confirmation, approval, or additional input from the user. Write the complete content directly and immediately.\n\n"
@@ -22,6 +21,19 @@ const WORKFLOW_TOOLS_DISABLED: Record<string, boolean> = {
   workflow_review_save: false,
 }
 
+/** Read/exploration tools. Disabled when the child session has all needed context inline. */
+const FILE_TOOLS_DISABLED: Record<string, boolean> = {
+  read: false,
+  glob: false,
+  grep: false,
+  webfetch: false,
+  task: false,
+}
+
+export type RunDevOpts = {
+  disableFileTools?: boolean
+}
+
 function getLanguageLabel(language: string): string {
   return new Intl.DisplayNames(["en"], { type: "language" }).of(language) ?? language
 }
@@ -30,6 +42,12 @@ function buildLanguageInstruction(language: string): string {
   if (language === "en") return ""
   const label = getLanguageLabel(language)
   return `IMPORTANT: Write your entire response in ${label} (${language}). All headings, descriptions, labels, and content must be in ${label}.\n\n`
+}
+
+function resolveToolMap(opts: RunDevOpts | undefined): Record<string, boolean> {
+  return opts?.disableFileTools
+    ? { ...WORKFLOW_TOOLS_DISABLED, ...FILE_TOOLS_DISABLED }
+    : WORKFLOW_TOOLS_DISABLED
 }
 
 async function extractLastAssistantText(
@@ -54,22 +72,13 @@ async function extractLastAssistantText(
   return ""
 }
 
-/** Tools that are read-only/file-access — disable when the agent has all context inline. */
-const FILE_TOOLS_DISABLED: Record<string, boolean> = {
-  read: false,
-  glob: false,
-  grep: false,
-  task: false,
-  webfetch: false,
-}
-
-export async function runAgentSession(
+async function runChildSession(
   runCtx: WorkflowRunCtx,
-  agentName: AgentRole,
-  prompt: string,
-  opts: { disableFileTools?: boolean } = {},
+  agentName: string,
+  text: string,
+  tools: Record<string, boolean>,
 ): Promise<string> {
-  const { client, directory, sessionId: parentSessionId, config } = runCtx
+  const { client, directory, sessionId: parentSessionId } = runCtx
 
   const sessionRes = await client.session.create({
     body: { parentID: parentSessionId, title: `[workflow] ${agentName}` },
@@ -79,17 +88,13 @@ export async function runAgentSession(
   if (!session) throw new Error(`Failed to create session for agent "${agentName}"`)
 
   const sessionId = session.id
-  const languageInstruction = buildLanguageInstruction(config.language)
-  const tools = opts.disableFileTools
-    ? { ...WORKFLOW_TOOLS_DISABLED, ...FILE_TOOLS_DISABLED }
-    : WORKFLOW_TOOLS_DISABLED
 
   await client.session.prompt({
     path: { id: sessionId },
     body: {
       agent: agentName,
       tools,
-      parts: [{ type: "text", text: DIRECT_OUTPUT_INSTRUCTION + languageInstruction + prompt }],
+      parts: [{ type: "text", text }],
     },
     query: { directory },
   })
@@ -98,33 +103,24 @@ export async function runAgentSession(
   return extractLastAssistantText(client, sessionId, directory)
 }
 
+export async function runAgentSession(
+  runCtx: WorkflowRunCtx,
+  agentName: string,
+  prompt: string,
+  opts?: RunDevOpts,
+): Promise<string> {
+  const languageInstruction = buildLanguageInstruction(runCtx.config.language)
+  const text = DIRECT_OUTPUT_INSTRUCTION + languageInstruction + prompt
+  return runChildSession(runCtx, agentName, text, resolveToolMap(opts))
+}
+
 export async function runDevAgentSession(
   runCtx: WorkflowRunCtx,
-  agentName: AgentRole,
+  agentName: string,
   prompt: string,
+  opts?: RunDevOpts,
 ): Promise<string> {
-  const { client, directory, sessionId: parentSessionId, config } = runCtx
-
-  const sessionRes = await client.session.create({
-    body: { parentID: parentSessionId, title: `[workflow] ${agentName}` },
-    query: { directory },
-  })
-  const session = sessionRes.data
-  if (!session) throw new Error(`Failed to create session for agent "${agentName}"`)
-
-  const sessionId = session.id
-  const languageInstruction = buildLanguageInstruction(config.language)
-
-  await client.session.prompt({
-    path: { id: sessionId },
-    body: {
-      agent: agentName,
-      tools: WORKFLOW_TOOLS_DISABLED,
-      parts: [{ type: "text", text: languageInstruction + prompt }],
-    },
-    query: { directory },
-  })
-
-  await waitForIdle(client, sessionId, directory)
-  return extractLastAssistantText(client, sessionId, directory)
+  const languageInstruction = buildLanguageInstruction(runCtx.config.language)
+  const text = languageInstruction + prompt
+  return runChildSession(runCtx, agentName, text, resolveToolMap(opts))
 }

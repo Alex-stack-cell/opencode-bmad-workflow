@@ -1,13 +1,12 @@
 import { tool } from "@opencode-ai/plugin"
+import { rm } from "node:fs/promises"
+import { join } from "node:path"
 import type { WorkflowCtx, WorkflowRunCtx } from "../types/workflow.ts"
 import { withSession } from "../session/context.ts"
 import { runAgentSession } from "../session/agent.ts"
+import { readDoc, writeDoc } from "../storage/docs.ts"
 import { readSprintStatus, writeSprintStatus } from "../storage/sprint.ts"
 import { slugify } from "../parsers/slugify.ts"
-import { computeNextStoryNum, appendStoryToYaml } from "../parsers/sprint.ts"
-import { Paths } from "../constants/paths.ts"
-import { AgentRole } from "../agents/roles.ts"
-import { loadPreview, saveFiles, cleanPreview } from "../workflows/preview-save.ts"
 
 // ─── Tool factories ───────────────────────────────────────────────────────────
 
@@ -45,9 +44,9 @@ export function createStorySaveTool(ctx: WorkflowCtx) {
 
 // ─── Workflow implementation ──────────────────────────────────────────────────
 
-type StoryWorkflowArgs = WorkflowRunCtx & { epicId: number; storyTitle: string; storyDescription: string }
+type StoryArgs = WorkflowRunCtx & { epicId: number; storyTitle: string; storyDescription: string }
 
-async function generateStoryContent(args: StoryWorkflowArgs) {
+async function generateStoryContent(args: StoryArgs) {
   const { epicId, storyTitle, storyDescription, directory, ...runCtx } = args
 
   const existingStatus = await readSprintStatus(directory)
@@ -55,7 +54,7 @@ async function generateStoryContent(args: StoryWorkflowArgs) {
     ? `Epic context from sprint-status.yaml:\n\`\`\`yaml\n${existingStatus}\n\`\`\`\n\nThis story belongs to epic ID ${epicId}.`
     : `This story belongs to epic ID ${epicId}.`
 
-  const userStory = await runAgentSession({ ...runCtx, directory }, AgentRole.PM, `
+  const userStory = await runAgentSession({ ...runCtx, directory }, "pm", `
 Write a BMAD user story following this exact format.
 
 ${epicContext}
@@ -80,7 +79,7 @@ Do NOT repeat AC that test the same thing with trivial variations (e.g. "single 
 Include only realistic, testable acceptance criteria.
 `.trim())
 
-  const tasks = await runAgentSession({ ...runCtx, directory }, AgentRole.ARCHITECT, `
+  const tasks = await runAgentSession({ ...runCtx, directory }, "architect", `
 Based on this user story, produce a technical task breakdown and developer notes.
 
 Story title: ${storyTitle}
@@ -129,15 +128,15 @@ function buildStoryFile(storyId: string, title: string, userStory: string, tasks
   ].join("\n")
 }
 
-async function runStoryPreview(args: StoryWorkflowArgs): Promise<string> {
+async function runStoryPreview(args: StoryArgs): Promise<string> {
   const { epicId, storyTitle, directory } = args
   const slug = slugify(storyTitle)
-  const previewDir = Paths.storyPreviewDir(epicId, slug)
+  const previewDir = `ai-artifacts/.previews/story-${epicId}-${slug}`
 
   const { userStory, tasks } = await generateStoryContent(args)
 
   const storyContent = buildStoryFile(`${epicId}.?`, storyTitle, userStory, tasks)
-  await saveFiles(directory, { [`${previewDir}/story.md`]: storyContent })
+  await writeDoc(directory, `${previewDir}/story.md`, storyContent)
 
   return [
     `# Preview ready — Story: ${storyTitle}`,
@@ -150,13 +149,70 @@ async function runStoryPreview(args: StoryWorkflowArgs): Promise<string> {
   ].join("\n")
 }
 
-async function runStorySave(args: StoryWorkflowArgs): Promise<string> {
+function computeNextStoryNum(yaml: string, epicId: number): number {
+  if (!yaml) return 1
+  const nums = [...yaml.matchAll(/id:\s*"(\d+)\.(\d+)"/g)]
+    .filter(([, eId]) => Number(eId) === epicId)
+    .map(([, , sNum]) => Number(sNum))
+  return nums.length > 0 ? Math.max(...nums) + 1 : 1
+}
+
+function appendStoryToYaml(yaml: string, epicId: number, storyId: string, title: string, slug: string): string {
+  const newEntry = [
+    `      - id: "${storyId}"`,
+    `        title: "${title}"`,
+    `        status: ready-for-dev`,
+    `        parent: ${epicId}`,
+    `        file: implementation-artifacts/stories/${epicId}-${storyId.split(".")[1]}-${slug}.md`,
+  ].join("\n")
+
+  if (!yaml) {
+    return [
+      `epics:`,
+      `  - id: ${epicId}`,
+      `    name: ""`,
+      `    status: planned`,
+      `    priority: HIGH`,
+      `    goal: ""`,
+      `    stories:`,
+      newEntry,
+    ].join("\n") + "\n"
+  }
+
+  const lines = yaml.split("\n")
+  let inTargetEpic = false
+  let lastStoryLineIdx = -1
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (/^\s*-\s+id:\s+\d+/.test(line)) {
+      inTargetEpic = line.includes(`id: ${epicId}`) || line.includes(`id: "${epicId}"`)
+    }
+    if (inTargetEpic && /^\s*-\s+id:\s+"[\d.]+"|^\s*stories:/.test(line)) {
+      lastStoryLineIdx = i
+    }
+  }
+
+  if (lastStoryLineIdx === -1) return yaml + "\n" + newEntry + "\n"
+
+  let insertIdx = lastStoryLineIdx + 1
+  while (insertIdx < lines.length) {
+    const l = lines[insertIdx]
+    if (/^\s{2}-\s+id:\s+\d/.test(l) && !l.includes(`id: "${epicId}`)) break
+    insertIdx++
+  }
+
+  lines.splice(insertIdx, 0, newEntry)
+  return lines.join("\n")
+}
+
+async function runStorySave(args: StoryArgs): Promise<string> {
   const { epicId, storyTitle, storyDescription, directory, ...runCtx } = args
   const slug = slugify(storyTitle)
-  const previewDir = Paths.storyPreviewDir(epicId, slug)
+  const previewDir = `ai-artifacts/.previews/story-${epicId}-${slug}`
 
-  const preview = await loadPreview(directory, { story: `${previewDir}/story.md` })
-  const hasPreview = preview !== null
+  const previewStory = await readDoc(directory, `${previewDir}/story.md`)
+  const hasPreview = !!previewStory
 
   const existingStatus = await readSprintStatus(directory)
   const storyNum = computeNextStoryNum(existingStatus, epicId)
@@ -166,18 +222,22 @@ async function runStorySave(args: StoryWorkflowArgs): Promise<string> {
 
   let storyContent: string
   if (hasPreview) {
-    storyContent = preview.story.replace(/^# Story \d+\.[^:]+:/m, `# Story ${storyId}:`)
+    storyContent = previewStory.replace(/^# Story \d+\.[^:]+:/m, `# Story ${storyId}:`)
   } else {
     const { userStory, tasks } = await generateStoryContent({ ...runCtx, directory, epicId, storyTitle, storyDescription })
     storyContent = buildStoryFile(storyId, storyTitle, userStory, tasks)
   }
 
-  const [storyFilePath] = await saveFiles(directory, { [Paths.storyFile(epicId, storyNum, slug)]: storyContent })
+  const storyFilePath = await writeDoc(
+    directory,
+    `ai-artifacts/implementation-artifacts/stories/${epicId}-${storyNum}-${slug}.md`,
+    storyContent,
+  )
 
   const statusPath = await writeSprintStatus(directory, updatedStatus)
 
   if (hasPreview) {
-    await cleanPreview(directory, previewDir)
+    await rm(join(directory, previewDir), { recursive: true, force: true })
   }
 
   return [
