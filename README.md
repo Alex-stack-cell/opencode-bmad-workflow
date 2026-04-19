@@ -288,6 +288,9 @@ Two agent execution modes:
 
 ## Changelog
 
+### v0.4.1
+- **Fix:** `commands/workflow-setup.md` updated to document the new `local_model`, `context_budget`, and `shrink_mode` args and to pass through inline arguments without asking interactive questions. Without this fix, local models saw only the language prompt and ignored the other args in the user's command.
+
 ### v0.4.0
 - **New:** Local-model mode (`local_model: true`) — shrinks stories and conventions before prompting, disables file-read tools in dev sessions, and enforces a soft prompt-size cap. Eliminates the infinite-loop failure mode where small-context models exhaust their window reading files and trigger compaction. Configure via `/workflow-setup` or edit `ai-artifacts/.workflow-config.json` directly (`localModel`, `contextBudget`, `shrinkMode`).
 - **New:** `plugins/parsers/shrink.ts` — pure `shrinkStoryForTask` and `shrinkConventions`, deterministic heuristics, 15 unit tests.

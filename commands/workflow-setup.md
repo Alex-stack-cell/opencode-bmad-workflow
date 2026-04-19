@@ -1,11 +1,18 @@
 ---
-description: Configure workflow preferences for this project (language, etc.)
+description: Configure workflow preferences (language, local-model mode, context budget, shrink mode)
 ---
 
-STOP. Do NOT call any tool yet.
+If the user passed arguments inline (for example `local_model=true context_budget=100000 shrink_mode=balanced language=fr`), parse them and call `workflow_setup` directly with the matching tool args. Do NOT ask questions when arguments are provided.
 
-Ask the user: "Quelle langue pour les documents générés ? (en, fr, es, de, pt, it, ja, zh)"
+If the user passed NO arguments, call `workflow_setup` with no args — it will print the current config.
 
-Wait for their answer, then call `workflow_setup` with the language they provided.
+Available args for `workflow_setup`:
 
-Confirm the language that was set.
+- `language` — one of `en, fr, es, de, pt, it, ja, zh`
+- `local_model` — `true` or `false`. Enable for Qwen, DeepSeek-Coder, Devstral, Llama, or any model with < 32k usable context. Shrinks story/conventions before prompting and disables file-read tools in dev sessions.
+- `context_budget` — integer token budget (default `32000`). Set this to ~80% of your model's usable context window.
+- `shrink_mode` — `aggressive`, `balanced` (default), or `conservative`. Only applied when `local_model` is true.
+
+If the user asked to change the language and did NOT specify which, ask: "Quelle langue pour les documents générés ? (en, fr, es, de, pt, it, ja, zh)" — then call `workflow_setup` with only the `language` arg.
+
+After calling the tool, return its output verbatim. Do not summarize.
