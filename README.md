@@ -97,6 +97,8 @@ Tune per model:
 
 Frontier models (Claude, GPT, Gemini) should leave `local_model` off — the default preserves the previous behavior exactly.
 
+For a detailed guide covering model selection, LM Studio tuning, prompting patterns for MODIFY tasks, verification gates, and known failure modes, see [**docs/LOCAL_MODELS.md**](docs/LOCAL_MODELS.md).
+
 ---
 
 ## Installation
